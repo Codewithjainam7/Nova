@@ -1,14 +1,11 @@
 import os
 import sys
 import asyncio
-from dotenv import load_dotenv
+from backend.core.environment import load_environment
+load_environment()
+
 from google import genai
 import groq
-
-# Load environment
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
-load_dotenv(os.path.join(BASE_DIR, ".env.local"), override=True)
 
 def verify_gemini():
     print("=== Gemini Diagnostics ===")

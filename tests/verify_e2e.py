@@ -1,12 +1,8 @@
 import asyncio
 import os
 import sys
-from dotenv import load_dotenv
-
-# Load environment first
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-load_dotenv(os.path.join(BASE_DIR, ".env"))
-load_dotenv(os.path.join(BASE_DIR, ".env.local"), override=True)
+from backend.core.environment import load_environment
+load_environment()
 
 from backend.core.di import di_container, bootstrap_di
 from backend.kernel.core import NovaKernel
