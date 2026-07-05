@@ -212,6 +212,24 @@ It is the central intelligence of NOVA.
 
 ---
 
+# TASK GROUP 7 — Agent Router
+
+✓ Router Core
+
+✓ Agent Registry
+
+✓ Policy Engine
+
+✓ Agent Discovery
+
+✓ Health Monitor
+
+✓ Availability Tracker
+
+✓ Fallback Logic
+
+---
+
 # TASK GROUP 9 — Agent Manager
 
 ⬜ Agent Registry

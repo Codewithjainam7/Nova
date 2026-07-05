@@ -588,6 +588,24 @@ Status
 
 ---
 
+## Agent Router
+
+✓ Router Core
+
+✓ Agent Registry
+
+✓ Policy Engine
+
+✓ Agent Discovery
+
+✓ Health Monitor
+
+✓ Availability Tracker
+
+✓ Fallback Logic
+
+---
+
 ## Agent Manager
 
 ⬜ Agent Registry
