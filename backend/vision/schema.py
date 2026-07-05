@@ -18,6 +18,13 @@ class VisionBoundingBox(BaseModel):
     confidence: float
     label: Optional[str] = None
     text_content: Optional[str] = None
+    # UI Properties
+    element_id: Optional[str] = Field(default_factory=lambda: str(uuid.uuid4())[:8])
+    element_type: Optional[str] = None
+    clickable: bool = False
+    editable: bool = False
+    visible: bool = True
+    enabled: bool = True
 
 class VisionResult(BaseModel):
     result_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
