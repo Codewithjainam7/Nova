@@ -156,25 +156,25 @@ It is the central intelligence of NOVA.
 
 # TASK GROUP 6 — Execution Engine
 
-⬜ Execution Manager
+✓ Execution Manager
 
-⬜ Workflow Manager
+✓ Workflow Manager
 
-⬜ Task Queue
+✓ Task Queue
 
-⬜ Parallel Execution
+✓ Parallel Execution
 
-⬜ Sequential Execution
+✓ Sequential Execution
 
-⬜ Retry Engine
+✓ Retry Engine
 
-⬜ Timeout Engine
+✓ Timeout Engine
 
-⬜ Cancellation Engine
+✓ Cancellation Engine
 
-⬜ Progress Tracking
+✓ Progress Tracking
 
-⬜ Recovery Engine
+✓ Recovery Engine
 
 ---
 
@@ -288,7 +288,7 @@ It is the central intelligence of NOVA.
 
 ✓ Planner Tests
 
-⬜ Execution Tests
+✓ Execution Tests
 
 ⬜ Prompt Tests
 
