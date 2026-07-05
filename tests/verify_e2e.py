@@ -1,5 +1,6 @@
 import asyncio
 import os
+import sys
 from dotenv import load_dotenv
 
 # Load environment first
@@ -7,15 +8,14 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 load_dotenv(os.path.join(BASE_DIR, ".env"))
 load_dotenv(os.path.join(BASE_DIR, ".env.local"), override=True)
 
-# Inject mock API keys for testing purposes if not present
-if "GEMINI_API_KEY" not in os.environ:
-    os.environ["GEMINI_API_KEY"] = "mock_gemini_key"
-if "GROQ_API_KEY" not in os.environ:
-    os.environ["GROQ_API_KEY"] = "mock_groq_key"
-
 from backend.core.di import di_container, bootstrap_di
 from backend.kernel.core import NovaKernel
 from backend.kernel.schema import KernelRequest, KernelState
+
+if not os.environ.get("GEMINI_API_KEY") and not os.environ.get("GROQ_API_KEY"):
+    print("FATAL: Real AI provider API keys (GEMINI_API_KEY or GROQ_API_KEY) are unavailable.")
+    print("Please set them in .env.local")
+    sys.exit(1)
 
 async def verify_e2e():
     print("=== STARTING FULL END-TO-END VERIFICATION ===")
