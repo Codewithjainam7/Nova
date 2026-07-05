@@ -250,19 +250,19 @@ It is the central intelligence of NOVA.
 
 # TASK GROUP 10 — Verification Engine
 
-⬜ Verification Manager
+✓ Verification Manager
 
-⬜ Success Verification
+✓ Success Verification
 
-⬜ Failure Detection
+✓ Failure Detection
 
-⬜ Tool Verification
+✓ Tool Verification
 
-⬜ Agent Verification
+✓ Agent Verification
 
-⬜ Workflow Verification
+✓ Workflow Verification
 
-⬜ Verification Reports
+✓ Verification Reports
 
 ---
 
