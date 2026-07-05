@@ -70,23 +70,23 @@ It is the central intelligence of NOVA.
 
 # TASK GROUP 2 — Planner
 
-⬜ Planner Core
+✓ Planner Core
 
-⬜ Intent Detection
+✓ Intent Detection
 
-⬜ Goal Extraction
+✓ Goal Extraction
 
-⬜ Task Breakdown
+✓ Task Breakdown
 
-⬜ Task Prioritization
+✓ Task Prioritization
 
-⬜ Dependency Resolution
+✓ Dependency Resolution
 
-⬜ Multi-step Planning
+✓ Multi-step Planning
 
-⬜ Planner Validation
+✓ Planner Validation
 
-⬜ Planner Logging
+✓ Planner Logging
 
 ---
 
@@ -286,7 +286,7 @@ It is the central intelligence of NOVA.
 
 # TASK GROUP 13 — Testing
 
-⬜ Planner Tests
+✓ Planner Tests
 
 ⬜ Execution Tests
 

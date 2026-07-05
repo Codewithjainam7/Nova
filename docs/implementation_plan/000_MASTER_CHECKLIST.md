@@ -436,23 +436,23 @@ Status
 
 ## Planner
 
-⬜ Create Planner Module
+✓ Create Planner Module
 
-⬜ Intent Analyzer
+✓ Intent Analyzer
 
-⬜ Goal Extractor
+✓ Goal Extractor
 
-⬜ Task Decomposer
+✓ Task Decomposer
 
-⬜ Task Prioritizer
+✓ Task Prioritizer
 
-⬜ Dependency Resolver
+✓ Dependency Resolver
 
-⬜ Planning Strategies
+✓ Planning Strategies
 
-⬜ Planner Logger
+✓ Planner Logger
 
-⬜ Planner Metrics
+✓ Planner Metrics
 
 ---
 
