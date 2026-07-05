@@ -50,15 +50,15 @@ The project is considered initialized when:
 
 ## Setup
 
-⬜ Initialize Git Repository
+✓ Initialize Git Repository
 
-⬜ Configure .gitignore
+✓ Configure .gitignore
 
-⬜ Create README.md
+✓ Create README.md
 
-⬜ Create LICENSE
+✓ Create LICENSE
 
-⬜ Configure Git Branches
+✓ Configure Git Branches
 
 ---
 
@@ -66,33 +66,33 @@ The project is considered initialized when:
 
 ## React
 
-⬜ Create React Project
+✓ Create React Project
 
-⬜ Configure Vite
+✓ Configure Vite
 
-⬜ Configure TypeScript
+✓ Configure TypeScript
 
-⬜ Install TailwindCSS
+✓ Install TailwindCSS
 
-⬜ Install Framer Motion
+✓ Install Framer Motion
 
-⬜ Install Zustand
+✓ Install Zustand
 
-⬜ Install TanStack Query
+✓ Install TanStack Query
 
-⬜ Install React Router
+✓ Install React Router
 
-⬜ Install React Hook Form
+✓ Install React Hook Form
 
-⬜ Install Lucide React
+✓ Install Lucide React
 
-⬜ Configure Absolute Imports
+✓ Configure Absolute Imports
 
-⬜ Configure Aliases
+✓ Configure Aliases
 
-⬜ Configure Theme Provider
+✓ Configure Theme Provider
 
-⬜ Create App Layout
+✓ Create App Layout
 
 ---
 
