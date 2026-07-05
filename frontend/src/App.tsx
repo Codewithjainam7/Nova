@@ -17,7 +17,7 @@ const App: React.FC = () => {
         
         <Sidebar />
         
-        <main className="flex-1 relative h-full flex flex-col z-10">
+        <main className="flex-1 relative h-full flex flex-col z-10 min-h-0">
           <ChatLayout />
         </main>
         

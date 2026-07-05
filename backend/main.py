@@ -177,11 +177,41 @@ async def websocket_chat(websocket: WebSocket):
 @app.websocket("/ws/events")
 async def websocket_events(websocket: WebSocket):
     await events_ws_manager.connect(websocket)
+    
+    async def event_listener(payload, event_type=None):
+        try:
+            await websocket.send_json({
+                "type": event_type.value if event_type else "UNKNOWN",
+                "content": str(payload.get("message", "")) if isinstance(payload, dict) else str(payload),
+                "payload": payload
+            })
+        except Exception:
+            pass
+
+    # Subscribe to all kernel events by wrapping the callback to include the event_type
+    from backend.kernel.events import KernelEventType
+    
+    # Store listeners to unsubscribe later
+    listeners = []
+    for et in KernelEventType:
+        def make_listener(et_bound):
+            async def wrapper(payload):
+                await event_listener(payload, event_type=et_bound)
+            return wrapper
+        listener = make_listener(et)
+        listeners.append((et, listener))
+        kernel.event_bus.subscribe(et, listener)
+
     try:
         while True:
             await websocket.receive_text()
     except WebSocketDisconnect:
         events_ws_manager.disconnect(websocket)
+        for et, listener in listeners:
+            try:
+                kernel.event_bus._subscribers[et].remove(listener)
+            except ValueError:
+                pass
 
 if __name__ == "__main__":
     import uvicorn
