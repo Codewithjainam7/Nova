@@ -134,23 +134,23 @@ It is the central intelligence of NOVA.
 
 # TASK GROUP 5 — AI Provider Manager
 
-⬜ Provider Registry
+✓ Provider Registry
 
-⬜ Gemini Integration
+✓ Gemini Integration
 
-⬜ OpenRouter Integration
+✓ OpenRouter Integration
 
-⬜ Ollama Integration
+✓ Ollama Integration
 
-⬜ Provider Selection
+✓ Provider Selection
 
-⬜ Automatic Fallback
+✓ Automatic Fallback
 
-⬜ Health Checks
+✓ Health Checks
 
-⬜ Provider Metrics
+✓ Provider Metrics
 
-⬜ Streaming API
+✓ Streaming API
 
 ---
 
