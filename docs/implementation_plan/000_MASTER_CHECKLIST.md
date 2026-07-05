@@ -82,29 +82,29 @@ PROJECT INITIALIZATION
 
 ## Desktop
 
-⬜ Initialize Tauri v2
+✓ Initialize Tauri v2
 
-⬜ Configure IPC
+✓ Configure IPC
 
-⬜ Configure Window Manager
+✓ Configure Window Manager
 
-⬜ Configure Permissions
+✓ Configure Permissions
 
 ---
 
 ## Backend
 
-⬜ Initialize Python
+✓ Initialize Python
 
-⬜ Create Virtual Environment
+✓ Create Virtual Environment
 
-⬜ Install FastAPI
+✓ Install FastAPI
 
-⬜ Install Uvicorn
+✓ Install Uvicorn
 
-⬜ Install Pydantic
+✓ Install Pydantic
 
-⬜ Configure Logging
+✓ Configure Logging
 
 ---
 

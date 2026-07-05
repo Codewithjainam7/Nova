@@ -100,19 +100,19 @@ The project is considered initialized when:
 
 ## Tauri
 
-⬜ Install Rust
+✓ Install Rust
 
-⬜ Initialize Tauri v2
+✓ Initialize Tauri v2
 
-⬜ Configure Window
+✓ Configure Window
 
-⬜ Configure Permissions
+✓ Configure Permissions
 
-⬜ Configure Auto Start
+✓ Configure Auto Start
 
-⬜ Configure IPC
+✓ Configure IPC
 
-⬜ Configure Build
+✓ Configure Build
 
 ---
 
@@ -120,33 +120,33 @@ The project is considered initialized when:
 
 ## Python
 
-⬜ Create Virtual Environment
+✓ Create Virtual Environment
 
-⬜ Install FastAPI
+✓ Install FastAPI
 
-⬜ Install Uvicorn
+✓ Install Uvicorn
 
-⬜ Install Pydantic
+✓ Install Pydantic
 
-⬜ Install Loguru
+✓ Install Loguru
 
-⬜ Install SQLAlchemy
+✓ Install SQLAlchemy
 
-⬜ Install APScheduler
+✓ Install APScheduler
 
-⬜ Install Playwright
+✓ Install Playwright
 
-⬜ Install EasyOCR
+✓ Install EasyOCR
 
-⬜ Install OpenCV
+✓ Install OpenCV
 
-⬜ Install Pillow
+✓ Install Pillow
 
-⬜ Install PyWinAuto
+✓ Install PyWinAuto
 
-⬜ Install PyAutoGUI
+✓ Install PyAutoGUI
 
-⬜ Install ChromaDB
+✓ Install ChromaDB
 
 ---
 
