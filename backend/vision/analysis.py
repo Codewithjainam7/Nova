@@ -1,14 +1,48 @@
 import asyncio
+import io
+import pytesseract
+from PIL import Image
 from backend.vision.schema import VisionResult, VisionBoundingBox
 from backend.core.logger import app_logger
 
 class OCRManager:
     async def extract(self, image_data: bytes) -> VisionResult:
-        app_logger.debug("Extracting text via OCR")
-        await asyncio.sleep(0.1)
+        app_logger.debug("Extracting text via OCR (Tesseract)")
         
-        box = VisionBoundingBox(x=10, y=10, width=100, height=20, confidence=0.99, text_content="Mock OCR Text")
-        return VisionResult(full_text="Mock OCR Text", boxes=[box])
+        def _run_tesseract():
+            try:
+                img = Image.open(io.BytesIO(image_data))
+                
+                # Get structured data (bounding boxes & confidence)
+                data = pytesseract.image_to_data(img, output_type=pytesseract.Output.DICT)
+                
+                boxes = []
+                full_text_parts = []
+                
+                n_boxes = len(data['level'])
+                for i in range(n_boxes):
+                    text = data['text'][i].strip()
+                    conf = float(data['conf'][i])
+                    if text and conf > 0:
+                        box = VisionBoundingBox(
+                            x=data['left'][i],
+                            y=data['top'][i],
+                            width=data['width'][i],
+                            height=data['height'][i],
+                            confidence=conf / 100.0,  # Normalize to 0-1
+                            text_content=text,
+                            label="text"
+                        )
+                        boxes.append(box)
+                        full_text_parts.append(text)
+                        
+                full_text = " ".join(full_text_parts)
+                return VisionResult(full_text=full_text, boxes=boxes)
+            except Exception as e:
+                app_logger.error(f"Tesseract OCR failed: {e}")
+                raise
+
+        return await asyncio.to_thread(_run_tesseract)
 
 class ObjectDetector:
     async def detect(self, image_data: bytes) -> VisionResult:
