@@ -70,48 +70,25 @@ Future extensibility
 
 # High-Level Architecture
 
-The complete system consists of seven major layers.
+The complete system revolves around the **NOVA Kernel**, the central orchestration unit. No subsystem operates independently or calls another subsystem directly.
 
-┌─────────────────────────────┐
-│        User Layer           │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│      Interface Layer        │
-│ Dynamic Island / Chat / UI  │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│      AI Core Layer          │
-│ Planner / Reasoning / Memory│
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│     Execution Layer         │
-│ Orchestrator / Scheduler    │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│      Agent Layer            │
-│ Browser Desktop Vision etc. │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│      Tool Layer             │
-│ OS APIs / Browser APIs      │
-└──────────────┬──────────────┘
-               │
-               ▼
-┌─────────────────────────────┐
-│ Windows / Internet / Apps   │
-└─────────────────────────────┘
-
----
+```mermaid
+flowchart TD
+    A[User] --> B(NOVA Kernel)
+    B --> C(Planner)
+    B --> D(Execution Engine)
+    D --> E(Agent Router)
+    E --> F(Capability Resolver)
+    F --> G(Tool Registry)
+    B --> H(Verification Engine)
+    B --> I(Context Engine)
+    B --> J(AI Provider Manager)
+    J --> K[Response]
+    B --> L[(Memory)]
+    
+    classDef kernel fill:#f96,stroke:#333,stroke-width:4px;
+    class B kernel;
+```
 
 # Layer Responsibilities
 
@@ -341,45 +318,53 @@ No Shared Mutable State
 
 # Request Lifecycle
 
-Every request follows the same lifecycle.
+Every request follows the same lifecycle governed entirely by the NOVA Kernel.
 
 User Request
 
 ↓
 
-Intent Detection
+NOVA Kernel (Creates Session)
 
 ↓
 
-Context Collection
+Planner (Intent Detection / Execution Plan)
 
 ↓
 
-Memory Retrieval
+Execution Engine (Queues & Schedules)
 
 ↓
 
-Planning
+Agent Router (Selects Agent)
 
 ↓
 
-Execution Plan
+Capability Resolver (Maps Intent to System Capability)
 
 ↓
 
-Execution Engine
+Tool Registry (Fetches Executable Tool)
 
 ↓
 
-Agent Selection
+Tool Execution
 
 ↓
 
-Tool Invocation
+Verification Engine (Confirms Success/Failure)
 
 ↓
 
-Verification
+Context Engine (Collects & Compresses Environment State)
+
+↓
+
+AI Provider Manager (LLM Inference)
+
+↓
+
+NOVA Kernel (Aggregates Response)
 
 ↓
 
@@ -387,13 +372,9 @@ Memory Update
 
 ↓
 
-Response Generation
-
-↓
-
 User
 
-No module may bypass this lifecycle.
+No module may bypass this lifecycle or orchestrate it themselves.
 
 ---
 

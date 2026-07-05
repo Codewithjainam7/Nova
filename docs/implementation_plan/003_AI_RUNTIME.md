@@ -359,3 +359,35 @@ Do not begin Phase 3 until:
 ---
 
 End of AI_RUNTIME_IMPLEMENTATION_PLAN.md
+---
+
+# TASK GROUP 10 — NOVA Kernel
+
+? NovaKernel
+
+? KernelManager
+
+? KernelRuntime
+
+? KernelContext
+
+? KernelSession
+
+? KernelRequest
+
+? KernelResponse
+
+? KernelLifecycle
+
+? KernelConfiguration
+
+? KernelMetrics
+
+? KernelLogger
+
+? KernelEventBus
+
+? KernelPipeline
+
+? KernelStateManager
+
