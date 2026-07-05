@@ -85,6 +85,7 @@ class KernelPipeline:
                         # Dispatch based on tool requirements
                         if "desktop" in task.required_tools and desktop:
                             app_logger.info("Routing to DesktopEngine")
+                            await self._stream_progress(session, "Simulating Desktop Automation...")
                             from backend.desktop.schema import DesktopAction, DesktopActionType
                             # For the test 'Open Notepad and write Hello NOVA'
                             if "notepad" in user_intent.lower():
@@ -93,6 +94,7 @@ class KernelPipeline:
                                 
                         if "browser" in task.required_tools and browser:
                             app_logger.info("Routing to BrowserEngine")
+                            await self._stream_progress(session, "Launching Browser Environment...")
                             from backend.browser.schema import BrowserAction, BrowserActionType
                             if "search" in user_intent.lower() or "google" in user_intent.lower():
                                 await browser.perform_action(BrowserAction(action_type=BrowserActionType.NAVIGATE, parameters={"url": "https://google.com"}))
@@ -100,6 +102,7 @@ class KernelPipeline:
 
                         if "vision" in task.required_tools and vision:
                             app_logger.info("Routing to VisionEngine")
+                            await self._stream_progress(session, "Capturing Screen & Running OCR Vision...")
                             from backend.vision.capture import ScreenCaptureManager
                             scm = ScreenCaptureManager()
                             img = scm.capture_full_screen()
