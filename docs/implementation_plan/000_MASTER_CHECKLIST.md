@@ -458,21 +458,21 @@ Status
 
 ## Context Engine
 
-⬜ Conversation Context
+✓ Conversation Context
 
-⬜ Desktop Context
+✓ Desktop Context
 
-⬜ Browser Context
+✓ Browser Context
 
-⬜ Time Context
+✓ Time Context
 
-⬜ User Context
+✓ User Context
 
-⬜ Running Task Context
+✓ Running Task Context
 
-⬜ Context Ranking
+✓ Context Ranking
 
-⬜ Context Cleanup
+✓ Context Cleanup
 
 ---
 
