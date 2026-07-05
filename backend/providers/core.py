@@ -27,9 +27,14 @@ class AIProviderManager:
 
     def bootstrap(self):
         """Register default/configured providers."""
-        # For testing, just register Mock. In production, this reads config to init Gemini/OpenRouter etc.
-        mock_provider = ProviderFactory.create(ProviderType.MOCK)
-        self.registry.register_provider(mock_provider)
+        gemini_provider = ProviderFactory.create(ProviderType.GEMINI)
+        groq_provider = ProviderFactory.create(ProviderType.GROQ)
+        
+        self.registry.register_provider(gemini_provider)
+        self.registry.register_provider(groq_provider)
+        
+        # Configure fallback Gemini -> Groq
+        self.fallback_manager.register_fallback(ProviderType.GEMINI, ProviderType.GROQ)
 
     async def generate(self, request: GenerationRequest) -> GenerationResponse:
         """Standard unary generation with fallback."""

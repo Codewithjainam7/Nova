@@ -22,7 +22,7 @@ export const NovaWebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
   
   const { 
     addMessage, 
-    updateLastMessage, 
+    replaceLastMessage,
     setIslandState, 
     addExecutionStep,
     setStreaming,
@@ -31,20 +31,21 @@ export const NovaWebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
 
   useEffect(() => {
     // Connect to Chat WS
-    wsChat.current = new WebSocket('ws://localhost:8000/ws/chat/client1');
+    wsChat.current = new WebSocket('ws://localhost:8000/ws/chat');
     
     wsChat.current.onmessage = (event) => {
       const data = JSON.parse(event.data);
       if (data.type === 'message_chunk') {
-        updateLastMessage(data.content);
+        replaceLastMessage(data.message.content);
       } else if (data.type === 'message_complete') {
+        replaceLastMessage(data.message.content);
         setStreaming(false);
         setIslandState('idle');
       }
     };
 
     // Connect to Events WS
-    wsEvents.current = new WebSocket('ws://localhost:8000/ws/events/client1');
+    wsEvents.current = new WebSocket('ws://localhost:8000/ws/events');
     
     wsEvents.current.onmessage = (event) => {
       const data = JSON.parse(event.data);

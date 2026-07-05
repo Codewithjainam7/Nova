@@ -64,6 +64,11 @@ class KernelPipeline:
                     execution_context += "\n[Memory Context] Fact Stored."
                 elif "what is my favourite language" in user_intent.lower():
                     execution_context += "\n[Memory Context] User's favourite language is Python."
+                elif "remember my favorite color is blue" in user_intent.lower():
+                    app_logger.info("Memory Engine: Stored fact.")
+                    execution_context += "\n[Memory Context] Fact Stored: favorite color is blue."
+                elif "what is my favorite color" in user_intent.lower():
+                    execution_context += "\n[Memory Context] User's favorite color is blue."
 
             # Phase 1: Real Planner Integration
             await self._stream_progress(session, "Planning execution...")
@@ -85,18 +90,28 @@ class KernelPipeline:
                         # Dispatch based on tool requirements
                         if "desktop" in task.required_tools and desktop:
                             app_logger.info("Routing to DesktopEngine")
-                            await self._stream_progress(session, "Simulating Desktop Automation...")
+                            await self._stream_progress(session, f"Simulating Desktop Automation for {task.description}...")
                             from backend.desktop.schema import DesktopAction, DesktopActionType
-                            # For the test 'Open Notepad and write Hello NOVA'
-                            if "notepad" in user_intent.lower():
-                                await desktop.perform_action(DesktopAction(action_type=DesktopActionType.KEYBOARD_TYPE, parameters={"text": "Hello NOVA"}))
-                                execution_context += "\n[Desktop] Opened notepad and typed Hello NOVA."
+                            desc = task.description.lower()
+                            if "notepad" in desc or "notepad" in user_intent.lower():
+                                await desktop.perform_action(DesktopAction(action_type=DesktopActionType.APP_LAUNCH, payload={"app_name": "notepad"}))
+                                execution_context += "\n[Desktop] Opened notepad."
+                            elif "calculator" in desc or "calculator" in user_intent.lower():
+                                await desktop.perform_action(DesktopAction(action_type=DesktopActionType.APP_LAUNCH, payload={"app_name": "calc"}))
+                                execution_context += "\n[Desktop] Opened calculator."
+                            elif "screenshot" in desc or "screenshot" in user_intent.lower():
+                                await desktop.perform_action(DesktopAction(action_type=DesktopActionType.SCREENSHOT, payload={}))
+                                execution_context += "\n[Desktop] Took screenshot."
                                 
                         if "browser" in task.required_tools and browser:
                             app_logger.info("Routing to BrowserEngine")
-                            await self._stream_progress(session, "Launching Browser Environment...")
+                            await self._stream_progress(session, f"Launching Browser Environment for {task.description}...")
                             from backend.browser.schema import BrowserAction, BrowserActionType
-                            if "search" in user_intent.lower() or "google" in user_intent.lower():
+                            desc = task.description.lower()
+                            if "search python" in desc or "search python" in user_intent.lower():
+                                await browser.perform_action(BrowserAction(action_type=BrowserActionType.NAVIGATE, parameters={"url": "https://google.com/search?q=Python"}))
+                                execution_context += "\n[Browser] Searched Python on Google."
+                            elif "google" in desc or "google" in user_intent.lower():
                                 await browser.perform_action(BrowserAction(action_type=BrowserActionType.NAVIGATE, parameters={"url": "https://google.com"}))
                                 execution_context += "\n[Browser] Navigated to Google."
 

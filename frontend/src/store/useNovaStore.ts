@@ -27,6 +27,7 @@ interface NovaState {
   // Actions
   addMessage: (msg: Message) => void;
   updateLastMessage: (content: string) => void;
+  replaceLastMessage: (content: string) => void;
   addExecutionStep: (step: ExecutionStep) => void;
   updateExecutionStep: (id: string, status: ExecutionStep['status']) => void;
   clearExecutionTimeline: () => void;
@@ -47,6 +48,14 @@ export const useNovaStore = create<NovaState>((set) => ({
     const msgs = [...state.messages];
     if (msgs.length > 0) {
       msgs[msgs.length - 1].content += content;
+    }
+    return { messages: msgs };
+  }),
+  
+  replaceLastMessage: (content) => set((state) => {
+    const msgs = [...state.messages];
+    if (msgs.length > 0) {
+      msgs[msgs.length - 1].content = content;
     }
     return { messages: msgs };
   }),

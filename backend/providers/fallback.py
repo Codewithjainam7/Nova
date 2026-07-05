@@ -6,10 +6,18 @@ from backend.providers.interface import ProviderInterface
 class FallbackManager:
     def __init__(self, registry: ProviderRegistry):
         self.registry = registry
+        self.fallback_map = {}
+
+    def register_fallback(self, primary: ProviderType, fallback: ProviderType):
+        self.fallback_map[primary] = fallback
 
     def get_fallback(self, failed_provider: ProviderType) -> Optional[ProviderInterface]:
         """Get the next best provider when one fails."""
-        priority = [ProviderType.GEMINI, ProviderType.OPENROUTER, ProviderType.OLLAMA, ProviderType.MOCK]
+        fallback_type = self.fallback_map.get(failed_provider)
+        if fallback_type:
+            return self.registry.get_provider(fallback_type)
+            
+        priority = [ProviderType.GEMINI, ProviderType.GROQ]
         
         try:
             current_index = priority.index(failed_provider)

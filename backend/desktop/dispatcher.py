@@ -10,7 +10,7 @@ class DesktopPermissionManager:
         # Dummy logic for permissions
         if self.level == DesktopPermissionLevel.READ_ONLY:
             # Prevent destructive actions
-            if "WRITE" in action.action_type.name or "DELETE" in action.action_type.name:
+            if any(keyword in action.action_type.name for keyword in ["WRITE", "DELETE", "CREATE", "RENAME", "MOVE"]):
                 app_logger.warning(f"Permission denied for action: {action.action_type}")
                 return False
         return True
@@ -41,15 +41,26 @@ class DesktopActionDispatcher:
     async def dispatch(self, action: DesktopAction) -> bool:
         # Simplistic dispatch mapping for prototype
         try:
-            if action.action_type.name == "MOUSE_MOVE":
-                await self.registry["mouse"].move(action.payload.get("x", 0), action.payload.get("y", 0))
-            elif action.action_type.name == "APP_LAUNCH":
-                await self.registry["app"].launch(action.payload.get("path", ""))
-            elif action.action_type.name == "SCREENSHOT":
-                await self.registry["screenshot"].capture_screen()
+            action_name = action.action_type.name
+            
+            if action_name in ["MOUSE_MOVE", "MOUSE_CLICK", "MOUSE_DRAG", "MOUSE_SCROLL"]:
+                return await self.registry["mouse"].execute(action)
+            elif action_name in ["APP_LAUNCH", "APP_CLOSE", "APP_FIND"]:
+                return await self.registry["app"].execute(action)
+            elif action_name in ["WINDOW_MINIMIZE", "WINDOW_MAXIMIZE", "WINDOW_RESTORE", "WINDOW_MOVE", "WINDOW_RESIZE", "WINDOW_FOCUS"]:
+                return await self.registry["window"].execute(action)
+            elif action_name in ["KEYBOARD_TYPE", "KEYBOARD_SHORTCUT"]:
+                return await self.registry["keyboard"].execute(action)
+            elif action_name in ["CLIPBOARD_READ", "CLIPBOARD_WRITE"]:
+                return await self.registry["clipboard"].execute(action)
+            elif action_name == "SCREENSHOT":
+                return await self.registry["screenshot"].execute(action)
+            elif action_name.startswith("FS_"):
+                return await self.registry["fs"].execute(action)
             else:
                 app_logger.debug(f"Dispatched generic action: {action.action_type}")
                 await asyncio.sleep(0.01)
-            return True
+                return True
+
         except Exception as e:
             raise e

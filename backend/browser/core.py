@@ -3,7 +3,7 @@ from typing import Optional
 from backend.browser.schema import BrowserSession, BrowserAction, BrowserPermissionLevel, BrowserMetrics
 from backend.browser.adapters import (
     BrowserLauncher, TabManager, NavigationManager, DOMManager, NetworkMonitor,
-    DownloadManager, UploadManager, CookieManager, ScreenshotManager, PDFExporter,
+    DownloadManager, UploadManager, ScreenshotManager, PDFExporter,
     JavaScriptExecutor, HistoryManager, BookmarkManager
 )
 from backend.browser.dispatcher import BrowserActionQueue, BrowserActionDispatcher, BrowserRecoveryManager, BrowserPermissionManager
@@ -20,6 +20,13 @@ class BrowserStateManager:
         self.active_tab_id: Optional[str] = None
         self.current_url: str = ""
 
+from backend.browser.playwright_adapter import (
+    PlaywrightBrowserLauncher, PlaywrightTabManager, PlaywrightNavigationManager,
+    PlaywrightDOMManager, PlaywrightScreenshotManager, PlaywrightPDFExporter,
+    PlaywrightJavaScriptExecutor, PlaywrightDownloadManager, PlaywrightUploadManager,
+    PlaywrightNetworkMonitor, PlaywrightCookieManager
+)
+
 class BrowserManager:
     """Internal orchestration of browser components."""
     def __init__(self, permission_level: BrowserPermissionLevel):
@@ -29,17 +36,17 @@ class BrowserManager:
         self.state = BrowserStateManager()
         
         # Initialize Adapters
-        self.launcher = BrowserLauncher()
-        self.tab = TabManager()
-        self.navigation = NavigationManager()
-        self.dom = DOMManager()
-        self.network = NetworkMonitor()
-        self.download = DownloadManager()
-        self.upload = UploadManager()
-        self.cookie = CookieManager()
-        self.screenshot = ScreenshotManager()
-        self.pdf = PDFExporter()
-        self.js = JavaScriptExecutor()
+        self.launcher = PlaywrightBrowserLauncher()
+        self.tab = PlaywrightTabManager()
+        self.navigation = PlaywrightNavigationManager()
+        self.dom = PlaywrightDOMManager()
+        self.network = PlaywrightNetworkMonitor()
+        self.download = PlaywrightDownloadManager()
+        self.upload = PlaywrightUploadManager()
+        self.screenshot = PlaywrightScreenshotManager()
+        self.pdf = PlaywrightPDFExporter()
+        self.js = PlaywrightJavaScriptExecutor()
+        self.cookie = PlaywrightCookieManager()
         
         registry = {
             "launcher": self.launcher,

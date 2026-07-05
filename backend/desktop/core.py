@@ -1,8 +1,11 @@
 import time
 from typing import Optional
 from backend.desktop.schema import DesktopSession, DesktopAction, DesktopPermissionLevel, DesktopMetrics
-from backend.desktop.controllers import MouseController, KeyboardController, WindowManager, ApplicationManager
-from backend.desktop.managers import ClipboardManager, ScreenshotManager, FilesystemManager, ProcessManager
+from backend.desktop.windows_adapters import (
+    WindowsApplicationManager, WindowsWindowManager, WindowsMouseController,
+    WindowsKeyboardController, WindowsClipboardManager, WindowsScreenshotManager,
+    WindowsFilesystemManager, WindowsProcessManager
+)
 from backend.desktop.dispatcher import DesktopActionQueue, DesktopActionDispatcher, DesktopRecoveryManager, DesktopPermissionManager
 from backend.core.logger import app_logger
 
@@ -25,14 +28,14 @@ class DesktopManager:
         self.state = DesktopStateManager()
         
         # Initialize Controllers
-        self.mouse = MouseController()
-        self.keyboard = KeyboardController()
-        self.window = WindowManager()
-        self.app = ApplicationManager()
-        self.clipboard = ClipboardManager()
-        self.screenshot = ScreenshotManager()
-        self.fs = FilesystemManager()
-        self.process = ProcessManager()
+        self.mouse = WindowsMouseController()
+        self.keyboard = WindowsKeyboardController()
+        self.window = WindowsWindowManager()
+        self.app = WindowsApplicationManager()
+        self.clipboard = WindowsClipboardManager()
+        self.screenshot = WindowsScreenshotManager()
+        self.fs = WindowsFilesystemManager()
+        self.process = WindowsProcessManager()
         
         # Wire Dispatcher
         registry = {
@@ -42,7 +45,8 @@ class DesktopManager:
             "app": self.app,
             "clipboard": self.clipboard,
             "screenshot": self.screenshot,
-            "fs": self.fs
+            "fs": self.fs,
+            "process": self.process
         }
         self.dispatcher = DesktopActionDispatcher(registry)
 

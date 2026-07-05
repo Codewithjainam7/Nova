@@ -28,6 +28,10 @@ class DesktopActionType(str, Enum):
     FS_COPY = "FS_COPY"
     FS_MOVE = "FS_MOVE"
     FS_DELETE = "FS_DELETE"
+    FS_CREATE_DIRECTORY = "FS_CREATE_DIRECTORY"
+    FS_CREATE_FILE = "FS_CREATE_FILE"
+    FS_RENAME = "FS_RENAME"
+    FS_LIST = "FS_LIST"
 
 class DesktopPermissionLevel(str, Enum):
     READ_ONLY = "READ_ONLY"

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 class ProviderType(str, Enum):
     GEMINI = "gemini"
+    GROQ = "groq"
     OPENROUTER = "openrouter"
     OLLAMA = "ollama"
     MOCK = "mock"

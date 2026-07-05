@@ -3,19 +3,21 @@ from typing import List, Optional
 from backend.chat.schema import ChatConversation, ChatMessage
 from backend.core.logger import app_logger
 
+from backend.memory.sqlite_store import SQLiteStore
+
 class ChatMessageStore:
     """Manages CRUD for messages within a conversation memory."""
     def __init__(self):
-        self._conversations = {} # Mock DB
+        self.sqlite = SQLiteStore()
         
     def save_conversation(self, conv: ChatConversation):
-        self._conversations[conv.conversation_id] = conv
+        self.sqlite.save_conversation(conv)
         
     def get_conversation(self, conv_id: str) -> Optional[ChatConversation]:
-        return self._conversations.get(conv_id)
+        return self.sqlite.get_conversation(conv_id)
         
     def get_all(self) -> List[ChatConversation]:
-        return list(self._conversations.values())
+        return self.sqlite.get_all_conversations()
 
 class ChatHistory:
     """Handles logic for grouping, folders, pinning, and archiving."""

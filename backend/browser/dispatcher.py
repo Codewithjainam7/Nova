@@ -41,19 +41,32 @@ class BrowserActionDispatcher:
 
     async def dispatch(self, action: BrowserAction) -> bool:
         try:
-            if action.action_type.name == "LAUNCH":
-                await self.registry["launcher"].launch()
-            elif action.action_type.name == "NAVIGATE":
-                await self.registry["navigation"].navigate(action.payload.get("url", ""))
-            elif action.action_type.name == "CLICK":
-                await self.registry["dom"].click(action.payload.get("selector", ""))
-            elif action.action_type.name == "DOWNLOAD":
-                await self.registry["download"].download(action.payload.get("url", ""))
-            elif action.action_type.name == "SCREENSHOT":
-                await self.registry["screenshot"].capture()
+            # Route to the appropriate adapter based on action type
+            action_name = action.action_type.name
+            
+            if action_name == "LAUNCH":
+                return await self.registry["launcher"].execute(action)
+            elif action_name in ["NEW_TAB", "CLOSE_TAB", "SWITCH_TAB"]:
+                return await self.registry["tab"].execute(action)
+            elif action_name in ["NAVIGATE", "RELOAD", "BACK", "FORWARD"]:
+                return await self.registry["navigation"].execute(action)
+            elif action_name in ["CLICK", "DOUBLE_CLICK", "RIGHT_CLICK", "HOVER", "TYPE", "FILL", "SELECT", "CHECK", "UNCHECK", "SCROLL", "EXTRACT_TEXT", "EXTRACT_HTML", "EXTRACT_ATTRIBUTES", "WAIT_FOR_ELEMENT"]:
+                return await self.registry["dom"].execute(action)
+            elif action_name == "SCREENSHOT":
+                return await self.registry["screenshot"].execute(action)
+            elif action_name == "DOWNLOAD":
+                return await self.registry["download"].execute(action)
+            elif action_name == "UPLOAD":
+                return await self.registry["upload"].execute(action)
+            elif action_name == "EXECUTE_JS":
+                return await self.registry["js"].execute(action)
+            elif action_name == "WAIT_FOR_NETWORK":
+                return await self.registry["network"].execute(action)
+            elif action_name == "EXPORT_PDF":
+                return await self.registry["pdf"].execute(action)
             else:
                 app_logger.debug(f"Dispatched generic browser action: {action.action_type}")
                 await asyncio.sleep(0.01)
-            return True
+                return True
         except Exception as e:
             raise e
