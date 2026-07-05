@@ -1,4 +1,4 @@
-# 003 AI RUNTIME
+﻿# 003 AI RUNTIME
 
 # AI RUNTIME IMPLEMENTATION PLAN
 
@@ -116,19 +116,19 @@ It is the central intelligence of NOVA.
 
 # TASK GROUP 4 — Prompt Manager
 
-⬜ Prompt Registry
+✓ Prompt Registry
 
-⬜ Prompt Loader
+✓ Prompt Loader
 
-⬜ Prompt Versioning
+✓ Prompt Versioning
 
-⬜ Prompt Templates
+✓ Prompt Templates
 
-⬜ Context Injection
+✓ Context Injection
 
-⬜ Prompt Optimization
+✓ Prompt Optimization
 
-⬜ Prompt Validation
+✓ Prompt Validation
 
 ---
 
@@ -361,7 +361,7 @@ Do not begin Phase 3 until:
 End of AI_RUNTIME_IMPLEMENTATION_PLAN.md
 ---
 
-# TASK GROUP 10 � NOVA Kernel
+# TASK GROUP 10 � NOVA Kernel
 
 ? NovaKernel
 
