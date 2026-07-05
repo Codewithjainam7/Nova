@@ -180,19 +180,19 @@ It is the central intelligence of NOVA.
 
 # TASK GROUP 7 — Tool Registry
 
-⬜ Tool Registry
+✓ Tool Registry
 
-⬜ Tool Discovery
+✓ Tool Discovery
 
-⬜ Tool Metadata
+✓ Tool Metadata
 
-⬜ Tool Availability
+✓ Tool Availability
 
-⬜ Tool Health Checks
+✓ Tool Health Checks
 
-⬜ Tool Permissions
+✓ Tool Permissions
 
-⬜ Tool Versioning
+✓ Tool Versioning
 
 ---
 

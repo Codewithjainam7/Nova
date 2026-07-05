@@ -558,19 +558,19 @@ Status
 
 ## Tool Registry
 
-⬜ Tool Registry
+✓ Tool Registry
 
-⬜ Tool Discovery
+✓ Tool Discovery
 
-⬜ Tool Metadata
+✓ Tool Metadata
 
-⬜ Tool Versioning
+✓ Tool Versioning
 
-⬜ Tool Permissions
+✓ Tool Permissions
 
-⬜ Tool Availability Checks
+✓ Tool Availability Checks
 
-⬜ Tool Health Checks
+✓ Tool Health Checks
 
 ---
 
