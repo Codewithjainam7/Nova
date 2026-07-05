@@ -198,17 +198,17 @@ It is the central intelligence of NOVA.
 
 # TASK GROUP 8 — Capability Registry
 
-⬜ Capability Manager
+✓ Capability Manager
 
-⬜ Capability Mapping
+✓ Capability Mapping
 
-⬜ Capability Discovery
+✓ Capability Discovery
 
-⬜ Capability Validation
+✓ Capability Validation
 
-⬜ Capability Search
+✓ Capability Search
 
-⬜ Capability Metadata
+✓ Capability Metadata
 
 ---
 

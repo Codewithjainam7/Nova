@@ -576,15 +576,15 @@ Status
 
 ## Capability Registry
 
-⬜ Capability Manager
+✓ Capability Manager
 
-⬜ Capability Mapping
+✓ Capability Mapping
 
-⬜ Capability Discovery
+✓ Capability Discovery
 
-⬜ Capability Validation
+✓ Capability Validation
 
-⬜ Capability Resolver
+✓ Capability Resolver
 
 ---
 
