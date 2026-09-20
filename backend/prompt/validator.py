@@ -21,6 +21,6 @@ class PromptValidator:
         # Dummy token validation
         estimated_tokens = len(rendered_content) // 4
         if estimated_tokens > self.policy.max_tokens:
-            app_logger.error(f"Rendered prompt exceeds max tokens ({estimated_tokens} > {self.policy.max_tokens})")
+            app_logger.error(f"Rendered prompt exceeds max length limit ({estimated_tokens} > {self.policy.max_tokens})")
             return False
         return True

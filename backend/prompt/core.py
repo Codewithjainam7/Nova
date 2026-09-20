@@ -13,7 +13,7 @@ from backend.core.logger import app_logger
 class PromptAuditLogger:
     @staticmethod
     def log_generation(output: PromptOutput):
-        app_logger.info(f"[PROMPT GENERATED] Type: {output.prompt_type}, Checksum: {output.checksum}, Estimated Units: {output.estimated_tokens}")
+        app_logger.debug(f"[PROMPT GENERATED] Type: {output.prompt_type}")
 
 class PromptManager:
     """Core class handling prompt execution pipeline."""

@@ -24,7 +24,7 @@ class ContextCompressor:
                 current_tokens += estimated
             else:
                 # We reached limit, skip the rest
-                app_logger.debug(f"Context compression dropped remaining items to stay under {self.max_tokens} tokens.")
+                app_logger.debug(f"Context compression dropped remaining items to stay under limit.")
                 break
                 
         return compressed

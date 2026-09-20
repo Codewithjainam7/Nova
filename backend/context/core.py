@@ -33,7 +33,7 @@ class ContextEngine:
             n = self.metrics.total_packages_built
             self.metrics.avg_tokens = ((self.metrics.avg_tokens * (n - 1)) + package.total_estimated_tokens) / n
             
-            app_logger.info(f"Built context package {package.context_id} with size {package.total_estimated_tokens}.")
+            app_logger.debug(f"Built context package {package.context_id}.")
             return package
         except Exception as e:
             app_logger.error(f"Failed to build context: {str(e)}")
