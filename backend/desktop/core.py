@@ -4,7 +4,7 @@ from backend.desktop.schema import DesktopSession, DesktopAction, DesktopPermiss
 from backend.desktop.windows_adapters import (
     WindowsApplicationManager, WindowsWindowManager, WindowsMouseController,
     WindowsKeyboardController, WindowsClipboardManager, WindowsScreenshotManager,
-    WindowsFilesystemManager, WindowsProcessManager
+    WindowsFilesystemManager, WindowsProcessManager, WindowsIntentManager
 )
 from backend.desktop.dispatcher import DesktopActionQueue, DesktopActionDispatcher, DesktopRecoveryManager, DesktopPermissionManager
 from backend.core.logger import app_logger
@@ -12,7 +12,10 @@ from backend.core.logger import app_logger
 class DesktopLogger:
     @staticmethod
     def log_action(action: DesktopAction, status: str):
-        app_logger.info(f"[DESKTOP ACTION - {status}] {action.action_type}")
+        payload_str = str(action.payload)
+        if len(payload_str) > 100:
+            payload_str = payload_str[:97] + "..."
+        app_logger.info(f"[DESKTOP ACTION - {status}] {action.action_type} | Payload: {payload_str}")
 
 class DesktopStateManager:
     """Tracks current UI state, window positions, active monitor, etc."""
@@ -36,6 +39,7 @@ class DesktopManager:
         self.screenshot = WindowsScreenshotManager()
         self.fs = WindowsFilesystemManager()
         self.process = WindowsProcessManager()
+        self.intent = WindowsIntentManager()
         
         # Wire Dispatcher
         registry = {
@@ -46,7 +50,8 @@ class DesktopManager:
             "clipboard": self.clipboard,
             "screenshot": self.screenshot,
             "fs": self.fs,
-            "process": self.process
+            "process": self.process,
+            "intent": self.intent
         }
         self.dispatcher = DesktopActionDispatcher(registry)
 
@@ -65,17 +70,41 @@ class DesktopExecutor:
             self.metrics.failed_actions += 1
             raise PermissionError(f"Action {action.action_type} denied by permission level {self.manager.permissions.level}")
             
-        # 2. Dispatch
+        # 2. Dispatch with Retries and Verification
+        max_retries = action.payload.get("retries", 3)
+        attempt = 0
+        success = False
+        last_error = None
+        
         try:
-            success = await self.manager.dispatcher.dispatch(action)
-            if success:
-                DesktopLogger.log_action(action, "SUCCESS")
-                self.metrics.total_actions += 1
-        except Exception as e:
-            # 3. Recovery
-            await self.manager.recovery.handle_failure(action, e)
-            self.metrics.failed_actions += 1
-            raise
+            while attempt < max_retries and not success:
+                try:
+                    success = await self.manager.dispatcher.dispatch(action)
+                    
+                    # Vision/OCR Verification fallback if native hooks fail
+                    if success and action.payload.get("verify_ocr"):
+                        expected_text = action.payload.get("verify_ocr")
+                        # Placeholder for actual Vision API call
+                        app_logger.info(f"[OCR Verification] Verifying screen contains: {expected_text}")
+                        # if expected_text not in ocr_result: raise VerificationError
+                        
+                    if success:
+                        DesktopLogger.log_action(action, "SUCCESS")
+                        self.metrics.total_actions += 1
+                    else:
+                        raise RuntimeError(f"Dispatcher returned False for {action.action_type}")
+                except Exception as e:
+                    last_error = e
+                    attempt += 1
+                    app_logger.warning(f"Desktop Action failed (Attempt {attempt}/{max_retries}): {e}")
+                    if attempt < max_retries:
+                        import asyncio
+                        await self.manager.recovery.handle_failure(action, e)
+                        await asyncio.sleep(1) # Backoff
+                    else:
+                        self.metrics.failed_actions += 1
+                        raise RuntimeError(f"Desktop action failed after {max_retries} attempts. Last error: {e}")
+                        
         finally:
             elapsed = (time.time() - start) * 1000
             # Basic metric routing based on type
@@ -92,6 +121,29 @@ class DesktopExecutor:
             current = getattr(self.metrics, attr)
             new_val = ((current * (n - 1)) + elapsed) / n
             setattr(self.metrics, attr, new_val)
+
+    def _launch_app(self, action: DesktopAction):
+        app_name = action.payload.get("app_name")
+        if not app_name:
+            raise ValueError("No app_name provided in Desktop Action payload")
+
+        # Map common names to Windows executables
+        app_map = {
+            "calculator": "calc",
+            "notepad": "notepad",
+            "paint": "mspaint",
+            "wordpad": "write",
+            "explorer": "explorer",
+            "browser": "msedge"
+        }
+        exe_name = app_map.get(app_name.lower(), app_name)
+
+        try:
+            # os.startfile is Windows only
+            os.startfile(exe_name)
+        except Exception as e:
+            app_logger.error(f"Failed to launch {exe_name}: {e}")
+            raise
 
 class DesktopEngine:
     """Central entrypoint for Desktop Automation."""

@@ -1,27 +1,32 @@
-import React from 'react';
-import { Sidebar } from './components/Sidebar';
-import { ChatLayout } from './components/Chat/ChatLayout';
-import { DynamicIsland } from './components/DynamicIsland';
-import { ExecutionTimeline } from './components/Timeline/ExecutionTimeline';
+import React, { useState, useEffect } from 'react';
+import { BrainScene } from './components/Brain/BrainScene';
 import { NovaWebSocketProvider } from './contexts/NovaWebSocket';
+import { OnboardingModal } from './components/Settings/OnboardingModal';
+import { WorkspaceOverlay } from './components/HUD/WorkspaceOverlay';
 
 const App: React.FC = () => {
+  const [showOnboarding, setShowOnboarding] = useState(false);
+
+  useEffect(() => {
+    fetch('http://localhost:8000/integrations')
+      .then(res => res.json())
+      .then(data => {
+        const anyConnected = data.some((int: any) => int.connected);
+        if (!anyConnected) {
+          setShowOnboarding(true);
+        }
+      })
+      .catch(() => {
+        // Backend not available, skip onboarding
+      });
+  }, []);
+
   return (
     <NovaWebSocketProvider>
-      <div className="flex h-screen w-screen bg-[#0f1115] text-white overflow-hidden relative font-sans selection:bg-blue-500/30">
-        {/* Abstract Background Elements */}
-        <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-blue-600/20 rounded-full blur-[120px] pointer-events-none" />
-        <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-purple-600/20 rounded-full blur-[120px] pointer-events-none" />
-
-        <DynamicIsland />
-        
-        <Sidebar />
-        
-        <main className="flex-1 relative h-full flex flex-col z-10 min-h-0">
-          <ChatLayout />
-        </main>
-        
-        <ExecutionTimeline />
+      <div className="fixed inset-0 bg-[#030508] overflow-hidden">
+        <BrainScene />
+        <WorkspaceOverlay />
+        <OnboardingModal isOpen={showOnboarding} onClose={() => setShowOnboarding(false)} />
       </div>
     </NovaWebSocketProvider>
   );

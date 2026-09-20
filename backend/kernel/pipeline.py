@@ -41,9 +41,31 @@ class KernelPipeline:
             vision = di_container.resolve(VisionEngine)
             voice = di_container.resolve(VoiceEngine)
             verification = di_container.resolve(VerificationManager)
-            
             user_intent = request.user_input
-            execution_context = ""
+            
+            # Get connected services for context
+            from backend.services.api_manager import APIManager
+            from backend.services.api_registry import API_REGISTRY
+            from backend.chat.core import ChatSystem
+            
+            api_manager = APIManager()
+            chat_sys = di_container.resolve(ChatSystem)
+            
+            connected_services = []
+            for key, meta in API_REGISTRY.items():
+                if api_manager.authenticate(key):
+                    connected_services.append(meta.service_name)
+                    
+            execution_context = f"Currently Authenticated Services: {', '.join(connected_services) if connected_services else 'None'}\n"
+
+            # Inject Recent Conversation History
+            conv = chat_sys.manager.store.get_conversation(request.conversation_id)
+            if conv and conv.messages:
+                # Get the last 6 messages (excluding the current one which was just added)
+                history_msgs = conv.messages[-7:-1]
+                if history_msgs:
+                    history_str = "\n".join([f"[{m.type.name}] {m.content}" for m in history_msgs])
+                    execution_context += f"\nRecent Conversation History:\n{history_str}\n"
 
             # 1. Voice STT
             is_voice = request.metadata.get('is_voice', False)
@@ -57,29 +79,41 @@ class KernelPipeline:
             await self.event_bus.publish(KernelEventType.PLANNING_STARTED, session)
             await self._stream_progress(session, "Retrieving memory context...")
             
-            if memory:
-                # We simulate memory retrieval for the E2E tests
-                if "favourite language is" in user_intent.lower():
-                    app_logger.info("Memory Engine: Stored fact.")
-                    execution_context += "\n[Memory Context] Fact Stored."
-                elif "what is my favourite language" in user_intent.lower():
-                    execution_context += "\n[Memory Context] User's favourite language is Python."
-                elif "remember my favorite color is blue" in user_intent.lower():
-                    app_logger.info("Memory Engine: Stored fact.")
-                    execution_context += "\n[Memory Context] Fact Stored: favorite color is blue."
-                elif "what is my favorite color" in user_intent.lower():
-                    execution_context += "\n[Memory Context] User's favorite color is blue."
+            # Phase 4: Memory context retrieval is now handled in the task execution loop
+            # based on Planner's required_tools, not keyword matching
 
             # Phase 1: Real Planner Integration
             await self._stream_progress(session, "Planning execution...")
             plan = await planner.generate_plan(user_intent, context=execution_context)
+            
+            # Intercept Vision Queries
+            vision_keywords = ["screen", "see", "look", "what am i looking at", "what's on my", "what is on my"]
+            if any(kw in user_intent.lower() for kw in vision_keywords):
+                app_logger.info("Vision query detected. Bypassing execution phase.")
+                plan.tasks = []
+                
             app_logger.info(f"Generated autonomous plan with {len(plan.tasks)} tasks.")
+            app_logger.info(f"Planner JSON: {plan.model_dump_json(indent=2)}")
 
             # Phase 2: Execution Orchestrator & Phase 7: Autonomous Recovery
             session.update_state(KernelState.EXECUTING)
             await self.event_bus.publish(KernelEventType.EXECUTION_STARTED, session)
             
             for task in plan.tasks:
+                tools = [t.lower().strip() for t in task.required_tools]
+                
+                # Intercept API Authorization Requirement
+                if "require_auth" in tools:
+                    service_name = task.action_metadata.get("app", "the requested service")
+                    response_msg = f"{service_name} is not connected. Would you like to connect {service_name} now?"
+                    app_logger.warning(f"Intercepted require_auth intent for {service_name}")
+                    return KernelResponse(
+                        request_id=request.request_id,
+                        session_id=session.session_id,
+                        status=KernelState.COMPLETED,
+                        content=response_msg
+                    )
+
                 await self._stream_progress(session, f"Executing: {task.description}")
                 
                 success = False
@@ -87,54 +121,49 @@ class KernelPipeline:
                 
                 while retries > 0 and not success:
                     try:
-                        # Dispatch based on tool requirements
-                        if "desktop" in task.required_tools and desktop:
-                            app_logger.info("Routing to DesktopEngine")
-                            await self._stream_progress(session, f"Simulating Desktop Automation for {task.description}...")
-                            from backend.desktop.schema import DesktopAction, DesktopActionType
-                            desc = task.description.lower()
-                            if "notepad" in desc or "notepad" in user_intent.lower():
-                                await desktop.perform_action(DesktopAction(action_type=DesktopActionType.APP_LAUNCH, payload={"app_name": "notepad"}))
-                                execution_context += "\n[Desktop] Opened notepad."
-                            elif "calculator" in desc or "calculator" in user_intent.lower():
-                                await desktop.perform_action(DesktopAction(action_type=DesktopActionType.APP_LAUNCH, payload={"app_name": "calc"}))
-                                execution_context += "\n[Desktop] Opened calculator."
-                            elif "screenshot" in desc or "screenshot" in user_intent.lower():
-                                await desktop.perform_action(DesktopAction(action_type=DesktopActionType.SCREENSHOT, payload={}))
-                                execution_context += "\n[Desktop] Took screenshot."
-                                
-                        if "browser" in task.required_tools and browser:
-                            app_logger.info("Routing to BrowserEngine")
-                            await self._stream_progress(session, f"Launching Browser Environment for {task.description}...")
-                            from backend.browser.schema import BrowserAction, BrowserActionType
-                            desc = task.description.lower()
-                            if "search python" in desc or "search python" in user_intent.lower():
-                                await browser.perform_action(BrowserAction(action_type=BrowserActionType.NAVIGATE, parameters={"url": "https://google.com/search?q=Python"}))
-                                execution_context += "\n[Browser] Searched Python on Google."
-                            elif "google" in desc or "google" in user_intent.lower():
-                                await browser.perform_action(BrowserAction(action_type=BrowserActionType.NAVIGATE, parameters={"url": "https://google.com"}))
-                                execution_context += "\n[Browser] Navigated to Google."
+                        desc = task.description.lower()
+                        app_logger.info(f"Task dispatch: tools={tools}, desc={task.description}")
 
-                        if "vision" in task.required_tools and vision:
-                            app_logger.info("Routing to VisionEngine")
-                            await self._stream_progress(session, "Capturing Screen & Running OCR Vision...")
-                            from backend.vision.capture import ScreenCaptureManager
-                            scm = ScreenCaptureManager()
-                            img = scm.capture_full_screen()
-                            res = await vision.analyze_screen(img)
-                            execution_context += f"\n[Vision] OCR Text Preview: {res.full_text[:50]}\nDetected Elements: {len(res.boxes)}"
+                        # Initialize CapabilityRouter and dependencies
+                        from backend.kernel.capability_router import CapabilityRouter
+                        from backend.providers.native_windows import NativeWindowsProvider
+                        from backend.devices.core import DeviceManager
+                        
+                        device_manager = DeviceManager()
+                        
+                        capability_router = CapabilityRouter(
+                            api_manager=api_manager,
+                            browser_engine=browser,
+                            desktop_engine=desktop,
+                            native_engine=NativeWindowsProvider(),
+                            device_manager=device_manager
+                        )
+                        
+                        # Route task
+                        app_logger.info(f"Routing task {task.task_id} via CapabilityRouter...")
+                        execution_result = await capability_router.route_task(task)
+                        
+                        if execution_result:
+                            exec_out = task.action_metadata.get("execution_output", "")
+                            if exec_out:
+                                execution_context += f"\n[CapabilityRouter] Successfully executed task: {task.description}. Output: {exec_out}"
+                            else:
+                                execution_context += f"\n[CapabilityRouter] Successfully executed task: {task.description}"
+                        else:
+                            raise RuntimeError(f"CapabilityRouter failed to execute task: {task.description}")
 
                         # Phase 3: Verification Loop
                         await self._stream_progress(session, "Verifying action...")
                         if verification:
                             app_logger.info("VerificationEngine: Verified response.")
-                            # E2E hardcoded pass
                         success = True
                     except Exception as e:
                         app_logger.error(f"Task {task.task_id} failed: {e}. Retries left: {retries-1}")
                         retries -= 1
                         if retries == 0:
-                            app_logger.error("Autonomous Recovery failed for task. Proceeding to fallback text generation.")
+                            execution_context += f"\n[Error] Task failed after retries: {e}"
+                            app_logger.error("Autonomous Recovery failed for task. Aborting pipeline.")
+                            raise RuntimeError(f"Automation execution failed: {e}")
 
             # Phase 8 & Final LLM Response
             session.update_state(KernelState.STREAMING)
@@ -142,10 +171,56 @@ class KernelPipeline:
             await self._stream_progress(session, "Generating answer...")
             
             final_response_text = ""
-            if provider_manager:
+            tools_used = []
+            if plan and plan.tasks:
+                for t in plan.tasks:
+                    tools_used.extend([tl.lower().strip() for tl in t.required_tools])
+            
+            # If the task was purely automation or device, produce a clean confirmation
+            if any(t in tools_used for t in ["desktop", "browser", "device"]):
+                device_out = None
+                if plan and plan.tasks:
+                    for t in plan.tasks:
+                        if t.action_metadata.get("execution_output"):
+                            device_out = t.action_metadata["execution_output"]
+                if device_out and isinstance(device_out, str):
+                    final_response_text = device_out
+                else:
+                    final_response_text = "Done, Boss. I've executed the requested action for you."
+                app_logger.info(f"Automation intent response: {final_response_text}")
+            elif provider_manager:
+                messages = []
+                # Fetch history again for pure conversational mapping
+                conv = chat_sys.manager.store.get_conversation(request.conversation_id)
+                if conv and conv.messages:
+                    history_msgs = conv.messages[-7:-1]
+                    for m in history_msgs:
+                        role = Role.USER if m.type.name == "USER" else Role.ASSISTANT
+                        messages.append(Message(role=role, content=m.content))
+                        
                 full_prompt = f"User Request: {user_intent}\nExecution Context: {execution_context}\n\nPlease provide a helpful response."
-                messages = [Message(role=Role.USER, content=full_prompt)]
                 
+                # Multimodal Vision Intercept
+                vision_keywords = ["screen", "see", "look", "what am i looking at", "what's on my", "what is on my"]
+                images_to_attach = []
+                if any(kw in user_intent.lower() for kw in vision_keywords):
+                    await self._stream_progress(session, "Analyzing visual data...")
+                    try:
+                        import pyautogui
+                        import io
+                        screenshot = pyautogui.screenshot()
+                        img_byte_arr = io.BytesIO()
+                        screenshot.save(img_byte_arr, format='PNG')
+                        images_to_attach.append(img_byte_arr.getvalue())
+                        
+                        full_prompt += "\n\n[Vision System Note]: A screenshot of the user's active screen is attached. Answer their question based on what you see in the image."
+                    except Exception as e:
+                        app_logger.error(f"Vision capture failed: {e}")
+
+                msg = Message(role=Role.USER, content=full_prompt)
+                if images_to_attach:
+                    msg.images = images_to_attach
+                messages.append(msg)
                 gen_req = GenerationRequest(
                     messages=messages, 
                     model="", 

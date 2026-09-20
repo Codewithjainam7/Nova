@@ -30,6 +30,7 @@ class KernelContext(BaseModel):
 
 class KernelRequest(BaseModel):
     request_id: str = Field(default_factory=lambda: str(uuid.uuid4()))
+    conversation_id: str = "default"
     user_input: str
     metadata: Dict[str, Any] = {}
     timeout: Optional[float] = None

@@ -29,10 +29,15 @@ class GeminiProvider(ProviderInterface):
             if msg.role.value == "system":
                 system_instruction = msg.content
             else:
+                parts = [types.Part.from_text(text=msg.content)]
+                if getattr(msg, "images", None):
+                    for img_bytes in msg.images:
+                        parts.append(types.Part.from_bytes(data=img_bytes, mime_type="image/png"))
+                
                 contents.append(
                     types.Content(
                         role="user" if msg.role.value == "user" else "model",
-                        parts=[types.Part.from_text(text=msg.content)]
+                        parts=parts
                     )
                 )
         return contents, system_instruction
@@ -46,6 +51,9 @@ class GeminiProvider(ProviderInterface):
         }
         if system_instruction:
             config_kwargs["system_instruction"] = system_instruction
+            
+        if getattr(request, "json_mode", False):
+            config_kwargs["response_mime_type"] = "application/json"
             
         config = types.GenerateContentConfig(**config_kwargs)
         

@@ -29,12 +29,12 @@ class VoiceSession(BaseModel):
     created_at: datetime = Field(default_factory=datetime.now)
 
 class VoiceConfiguration(BaseModel):
-    wake_word: str = "NOVA"
+    wake_word: str = "ADA"
     sensitivity: float = 0.5
     continuous_listening: bool = False
     stt_provider: str = "whisper"
-    tts_provider: str = "edge-tts"
-    voice_selection: str = "en-US-JennyNeural"
+    tts_provider: str = "cartesia"
+    voice_selection: str = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"
     speech_speed: float = 1.0
     speech_pitch: float = 1.0
     volume: float = 1.0

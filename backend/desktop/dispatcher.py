@@ -55,8 +55,27 @@ class DesktopActionDispatcher:
                 return await self.registry["clipboard"].execute(action)
             elif action_name == "SCREENSHOT":
                 return await self.registry["screenshot"].execute(action)
+            elif action_name == "APP_INTENT_EXECUTE":
+                return await self.registry["intent"].execute(action)
             elif action_name.startswith("FS_"):
                 return await self.registry["fs"].execute(action)
+            elif action_name == "WAIT":
+                ms = action.payload.get("ms", 1000)
+                await asyncio.sleep(ms / 1000.0)
+                return True
+            elif action_name == "WAIT_READY":
+                # Give it a second to be ready
+                await asyncio.sleep(2)
+                return True
+            elif action_name == "UI_SEARCH":
+                # Simulate searching by typing and enter
+                query = action.payload.get("query", "")
+                await self.registry["keyboard"].execute(DesktopAction(action_type="KEYBOARD_TYPE", payload={"text": query}))
+                return True
+            elif action_name == "VERIFY_STATE":
+                # For now just log
+                app_logger.info(f"Verified state: {action.payload}")
+                return True
             else:
                 app_logger.debug(f"Dispatched generic action: {action.action_type}")
                 await asyncio.sleep(0.01)

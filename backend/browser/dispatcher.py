@@ -20,7 +20,9 @@ class BrowserPermissionManager:
 class BrowserRecoveryManager:
     """Handles retries and fallbacks for failed Browser actions."""
     async def handle_failure(self, action: BrowserAction, exception: Exception):
-        app_logger.error(f"Browser Action failed: {action.action_type} - {str(exception)}")
+        import traceback
+        app_logger.error(f"Browser Action failed: {action.action_type} - {repr(exception)}")
+        app_logger.error(traceback.format_exc())
         app_logger.info("Attempting browser recovery...")
         await asyncio.sleep(0.1)
 
@@ -69,4 +71,7 @@ class BrowserActionDispatcher:
                 await asyncio.sleep(0.01)
                 return True
         except Exception as e:
+            import traceback
+            app_logger.error(f"Browser action exception: {e}")
+            app_logger.error(traceback.format_exc())
             raise e

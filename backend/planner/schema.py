@@ -38,6 +38,7 @@ class Task(BaseModel):
     required_agents: List[str] = []
     required_tools: List[str] = []
     risk: RiskLevel = RiskLevel.LOW
+    action_metadata: Dict[str, Any] = {}
 
 class Plan(BaseModel):
     plan_id: str

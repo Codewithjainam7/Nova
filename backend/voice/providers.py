@@ -1,4 +1,5 @@
 import asyncio
+import os
 from typing import AsyncGenerator
 from backend.core.logger import app_logger
 from faster_whisper import WhisperModel
@@ -23,10 +24,34 @@ class SpeechRecognizer:
             return ""
             
         def _transcribe_sync():
+            groq_api_key = os.getenv("GROQ_API_KEY", "")
+            if groq_api_key:
+                try:
+                    from groq import Groq
+                    import wave, io
+                    buf = io.BytesIO()
+                    with wave.open(buf, 'wb') as wf:
+                        wf.setnchannels(1)
+                        wf.setsampwidth(2)
+                        wf.setframerate(16000)
+                        wf.writeframes(audio)
+                    buf.seek(0)
+                    g_client = Groq(api_key=groq_api_key)
+                    t = g_client.audio.transcriptions.create(
+                        file=("audio.wav", buf.read()),
+                        model="whisper-large-v3-turbo",
+                        response_format="json",
+                        language="en",
+                        prompt="Ada, WhatsApp, Telegram, Spotify, Jainam"
+                    )
+                    return t.text.strip()
+                except Exception as ge:
+                    app_logger.warning(f"Groq STT in SpeechRecognizer failed: {ge}")
+
             self._ensure_model()
             # Convert raw int16 PCM bytes to float32 numpy array
             audio_array = np.frombuffer(audio, np.int16).astype(np.float32) / 32768.0
-            segments, info = self.model.transcribe(audio_array, beam_size=5)
+            segments, info = self.model.transcribe(audio_array, beam_size=5, initial_prompt="Vedya, WhatsApp, ADA, Jainam")
             text = " ".join([segment.text for segment in segments])
             return text.strip()
             
@@ -43,22 +68,46 @@ class SpeechRecognizer:
                 buffer = b""
             
 class SpeechSynthesizer:
-    """Abstracts TTS provider logic using edge-tts."""
-    def __init__(self, provider_name: str = "edge-tts", voice: str = "en-US-JennyNeural"):
+    """Abstracts TTS provider logic using Cartesia."""
+    def __init__(self, provider_name: str = "cartesia", voice: str = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"):
         self.provider = provider_name
         self.voice = voice
+        
+        # Load API key directly from environment
+        api_key = os.environ.get("CARTESIA_API_KEY", "")
+        if not api_key:
+            app_logger.warning("CARTESIA_API_KEY is not set. TTS may fail.")
+            
+        from cartesia import AsyncCartesia
+        self.client = AsyncCartesia(api_key=api_key)
 
     async def synthesize(self, text: str) -> bytes:
         app_logger.debug(f"[{self.provider}] Synthesizing speech for: {text[:20]}...")
-        communicate = edge_tts.Communicate(text, self.voice)
         audio_data = b""
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                audio_data += chunk["data"]
+        async for chunk in await self.client.tts.sse(
+            model_id="sonic-english",
+            transcript=text,
+            voice_id=self.voice,
+            stream=True,
+            output_format={
+                "container": "raw",
+                "encoding": "pcm_f32le",
+                "sample_rate": 24000,
+            },
+        ):
+            audio_data += chunk["audio"]
         return audio_data
 
-    async def synthesize_stream(self, text: str) -> AsyncGenerator[bytes, None]:
-        communicate = edge_tts.Communicate(text, self.voice)
-        async for chunk in communicate.stream():
-            if chunk["type"] == "audio":
-                yield chunk["data"]
+    async def synthesize_stream(self, text: str):
+        async for chunk in await self.client.tts.sse(
+            model_id="sonic-english",
+            transcript=text,
+            voice_id=self.voice,
+            stream=True,
+            output_format={
+                "container": "raw",
+                "encoding": "pcm_f32le",
+                "sample_rate": 24000,
+            },
+        ):
+            yield chunk["audio"]

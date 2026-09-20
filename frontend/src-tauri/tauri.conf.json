@@ -12,11 +12,27 @@
   "app": {
     "windows": [
       {
+        "label": "main",
         "title": "NOVA AI",
-        "width": 800,
-        "height": 600,
+        "width": 1200,
+        "height": 800,
         "resizable": true,
-        "fullscreen": false
+        "fullscreen": false,
+        "center": true
+      },
+      {
+        "label": "island",
+        "title": "NOVA Island",
+        "width": 350,
+        "height": 70,
+        "transparent": true,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "resizable": false,
+        "visible": false,
+        "url": "/?island=true",
+        "x": 785,
+        "y": 20
       }
     ],
     "security": {

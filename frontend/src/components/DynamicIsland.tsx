@@ -1,12 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useNovaStore } from '../store/useNovaStore';
 import { Mic, BrainCircuit, Globe, Monitor, ScanEye, CheckCircle, XCircle } from 'lucide-react';
 import clsx from 'clsx';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 
 export const DynamicIsland: React.FC = () => {
   const { islandState, islandMessage } = useNovaStore();
   const [expanded, setExpanded] = useState(false);
+
+  useEffect(() => {
+    const appWindow = getCurrentWindow();
+    console.log('[DynamicIsland] islandState changed to:', islandState);
+    if (islandState === 'idle') {
+      console.log('[DynamicIsland] Hiding window');
+      appWindow.hide().catch((e) => console.error('Hide error:', e));
+    } else {
+      console.log('[DynamicIsland] Showing window');
+      appWindow.show().catch((e) => console.error('Show error:', e));
+    }
+  }, [islandState]);
 
   if (islandState === 'idle') return null;
 
@@ -29,7 +42,7 @@ export const DynamicIsland: React.FC = () => {
   };
 
   return (
-    <div className="fixed top-6 left-1/2 transform -translate-x-1/2 z-50 drop-shadow-2xl">
+    <div className="w-full h-full flex items-center justify-center drop-shadow-2xl">
       <motion.div
         layout
         initial="collapsed"
@@ -37,7 +50,7 @@ export const DynamicIsland: React.FC = () => {
         variants={islandVariants}
         transition={{ type: "spring", stiffness: 300, damping: 24 }}
         onClick={() => setExpanded(!expanded)}
-        className="bg-black/80 backdrop-blur-xl border border-white/10 text-white overflow-hidden cursor-pointer flex flex-col justify-center shadow-black/50 shadow-2xl"
+        className="bg-black/80 backdrop-blur-xl border border-white/10 text-white overflow-hidden cursor-pointer flex flex-col justify-center shadow-black/50 shadow-2xl w-full h-full rounded-[32px]"
       >
         <div className="flex items-center justify-between px-4 h-12 w-full">
           <div className="flex items-center gap-3">

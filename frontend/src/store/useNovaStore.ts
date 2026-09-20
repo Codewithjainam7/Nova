@@ -23,6 +23,7 @@ interface NovaState {
   islandState: IslandState;
   islandMessage: string;
   isStreaming: boolean;
+  workspaceData: any;
   
   // Actions
   addMessage: (msg: Message) => void;
@@ -33,6 +34,7 @@ interface NovaState {
   clearExecutionTimeline: () => void;
   setIslandState: (state: IslandState, message?: string) => void;
   setStreaming: (streaming: boolean) => void;
+  setWorkspaceData: (data: any) => void;
 }
 
 export const useNovaStore = create<NovaState>((set) => ({
@@ -41,6 +43,9 @@ export const useNovaStore = create<NovaState>((set) => ({
   islandState: 'idle',
   islandMessage: '',
   isStreaming: false,
+  workspaceData: null,
+  
+  setWorkspaceData: (data) => set({ workspaceData: data }),
   
   addMessage: (msg) => set((state) => ({ messages: [...state.messages, msg] })),
   

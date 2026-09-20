@@ -67,9 +67,19 @@ venv.bak/
 # Playwright
 test-results/
 
-# SQLite
+# SQLite & ChromaDB
 *.sqlite3
 *.db
-
-# ChromaDB
 chroma_db/
+nova_chroma_db/
+
+# Temporary screenshots & XML dumps
+*.png
+*.jpg
+*.jpeg
+*.xml
+*.pdf
+results.txt
+platform-tools/
+platform-tools.zip
+settings.json

@@ -17,6 +17,7 @@ class Role(str, Enum):
 class Message(BaseModel):
     role: Role
     content: str
+    images: List[bytes] = Field(default_factory=list)
 
 class GenerationRequest(BaseModel):
     messages: List[Message]
@@ -27,6 +28,7 @@ class GenerationRequest(BaseModel):
     provider_type: Optional[ProviderType] = None # Force specific provider
     timeout: float = 30.0
     retry_count: int = 3
+    json_mode: bool = False
 
 class UsageMetrics(BaseModel):
     prompt_tokens: int = 0

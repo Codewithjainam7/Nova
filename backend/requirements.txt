@@ -15,5 +15,5 @@ sentence-transformers
 onnxruntime
 openwakeword
 whisper
-edge-tts
+cartesia
 python-dotenv

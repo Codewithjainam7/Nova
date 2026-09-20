@@ -36,7 +36,7 @@ export const PermissionDialog: React.FC<PermissionDialogProps> = ({
             </div>
 
             <p className="text-white/80 text-sm mb-6 leading-relaxed">
-              NOVA Autonomous Agent is requesting access to perform the following action:
+              ADA Autonomous Agent is requesting access to perform the following action:
               <br />
               <strong className="text-white block mt-2 p-2 bg-black/30 rounded border border-white/5">
                 {actionDescription}

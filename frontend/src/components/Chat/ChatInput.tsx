@@ -34,7 +34,7 @@ export const ChatInput: React.FC = () => {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder="Ask NOVA anything or request an action..."
+          placeholder="Ask ADA anything or request an action..."
           className="flex-1 max-h-32 min-h-[44px] bg-transparent text-white placeholder-white/30 resize-none outline-none py-3 px-2 text-sm"
           rows={1}
         />
@@ -54,7 +54,7 @@ export const ChatInput: React.FC = () => {
         )}
       </div>
       <div className="text-center mt-2">
-        <p className="text-[10px] text-white/30 tracking-wide font-medium">NOVA CAN MAKE MISTAKES. VERIFY IMPORTANT INFORMATION.</p>
+        <p className="text-[10px] text-white/30 tracking-wide font-medium">ADA CAN MAKE MISTAKES. VERIFY IMPORTANT INFORMATION.</p>
       </div>
     </div>
   );

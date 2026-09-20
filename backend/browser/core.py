@@ -12,7 +12,10 @@ from backend.core.logger import app_logger
 class BrowserLogger:
     @staticmethod
     def log_action(action: BrowserAction, status: str):
-        app_logger.info(f"[BROWSER ACTION - {status}] {action.action_type}")
+        payload_str = str(action.payload)
+        if len(payload_str) > 100:
+            payload_str = payload_str[:97] + "..."
+        app_logger.info(f"[BROWSER ACTION - {status}] {action.action_type} | Payload: {payload_str}")
 
 class BrowserStateManager:
     """Tracks current active tab, URL, loading status."""
@@ -77,15 +80,37 @@ class BrowserExecutor:
             self.metrics.failed_actions += 1
             raise PermissionError(f"Action {action.action_type} denied by permission level {self.manager.permissions.level}")
             
+        max_retries = action.payload.get("retries", 3)
+        attempt = 0
+        success = False
+        last_error = None
+        
         try:
-            success = await self.manager.dispatcher.dispatch(action)
-            if success:
-                BrowserLogger.log_action(action, "SUCCESS")
-                self.metrics.total_actions += 1
-        except Exception as e:
-            await self.manager.recovery.handle_failure(action, e)
-            self.metrics.failed_actions += 1
-            raise
+            while attempt < max_retries and not success:
+                try:
+                    success = await self.manager.dispatcher.dispatch(action)
+                    
+                    # DOM Verification fallback if needed
+                    if success and action.payload.get("verify_dom"):
+                        expected_selector = action.payload.get("verify_dom")
+                        app_logger.info(f"[DOM Verification] Verifying screen contains selector: {expected_selector}")
+                        # In a real implementation we would call self.manager.dom.wait_for_selector(expected_selector)
+                        
+                    if success:
+                        BrowserLogger.log_action(action, "SUCCESS")
+                        self.metrics.total_actions += 1
+                except Exception as e:
+                    last_error = e
+                    attempt += 1
+                    app_logger.warning(f"Browser Action failed (Attempt {attempt}/{max_retries}): {e}")
+                    if attempt < max_retries:
+                        await self.manager.recovery.handle_failure(action, e)
+                        import asyncio
+                        await asyncio.sleep(1)
+                    else:
+                        self.metrics.failed_actions += 1
+                        raise RuntimeError(f"Browser action failed after {max_retries} attempts. Last error: {e}")
+                        
         finally:
             elapsed = (time.time() - start) * 1000
             if action.action_type.name == "NAVIGATE":

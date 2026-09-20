@@ -78,7 +78,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ isOpen, onClose })
                   <div className="space-y-6">
                     <h3 className="text-lg font-semibold text-white border-b border-white/10 pb-2">General Settings</h3>
                     {/* Checkboxes / Toggles would go here */}
-                    <p className="text-sm text-white/50">NOVA System preferences and startup behavior.</p>
+                    <p className="text-sm text-white/50">ADA System preferences and startup behavior.</p>
                   </div>
                 )}
                 {activeTab === 'keys' && (
