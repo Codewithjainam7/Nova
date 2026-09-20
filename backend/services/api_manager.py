@@ -81,7 +81,7 @@ class APIManager:
             
             if auth_type == "oauth2":
                 if expires_at and time.time() > expires_at:
-                    app_logger.info(f"Token expired for {service_name}, refreshing...")
+                    app_logger.info(f"Session expired for {service_name}, refreshing auth...")
                     # Mock refresh
                     access_token = "new_mock_token_refreshed"
                     self._save_credentials(service_name, "oauth2", access_token=access_token, refresh_token=refresh_token, expires_at=time.time() + 3600)

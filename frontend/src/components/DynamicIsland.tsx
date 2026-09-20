@@ -11,12 +11,9 @@ export const DynamicIsland: React.FC = () => {
 
   useEffect(() => {
     const appWindow = getCurrentWindow();
-    console.log('[DynamicIsland] islandState changed to:', islandState);
     if (islandState === 'idle') {
-      console.log('[DynamicIsland] Hiding window');
       appWindow.hide().catch((e) => console.error('Hide error:', e));
     } else {
-      console.log('[DynamicIsland] Showing window');
       appWindow.show().catch((e) => console.error('Show error:', e));
     }
   }, [islandState]);

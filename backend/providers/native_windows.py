@@ -36,7 +36,7 @@ class NativeWindowsProvider:
                 return True
                 
             elif action == "sleep":
-                os.system("rundll32.exe powrprof.dll,SetSuspendState 0,1,0")
+                ctypes.windll.powrprof.SetSuspendState(0, 1, 0)
                 return True
                 
             elif action == "launch_process":
