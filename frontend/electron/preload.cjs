@@ -6,5 +6,18 @@ contextBridge.exposeInMainWorld('electronAPI', {
   showMainWindow: () => ipcRenderer.send('main-show'),
   hideMainWindow: () => ipcRenderer.send('main-hide'),
   toggleIsland: () => ipcRenderer.send('island-toggle'),
-  onShortcutTriggered: (callback) => ipcRenderer.on('shortcut-triggered', (_event, value) => callback(value))
+  onShortcutTriggered: (callback) => {
+    const handler = (_event, value) => {
+      try {
+        callback(value);
+      } catch (e) {}
+    };
+    ipcRenderer.on('shortcut-triggered', handler);
+    return () => {
+      try {
+        ipcRenderer.removeListener('shortcut-triggered', handler);
+      } catch (e) {}
+    };
+  }
 });
+

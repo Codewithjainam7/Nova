@@ -1,6 +1,7 @@
 import asyncio
 import base64
 import os
+import datetime
 from typing import Optional, Dict, Any
 from backend.core.logger import app_logger
 
@@ -83,18 +84,22 @@ class SystemMediaController:
                 except Exception as e:
                     app_logger.debug(f"[MediaController] Thumbnail load notice: {e}")
 
-            # Timeline properties
+            # Timeline properties (Real-time GSMTC calculation)
             pos = 0.0
             dur = 0.0
             try:
                 tl = curr.get_timeline_properties()
                 if tl:
-                    if tl.position:
-                        pos = tl.position.total_seconds()
-                    if tl.end_time:
-                        dur = tl.end_time.total_seconds()
-            except Exception:
-                pass
+                    base_pos = tl.position.total_seconds() if tl.position else 0.0
+                    dur = tl.end_time.total_seconds() if tl.end_time else 0.0
+                    if status == "playing" and tl.last_updated_time:
+                        now_utc = datetime.datetime.now(datetime.timezone.utc)
+                        delta = (now_utc - tl.last_updated_time).total_seconds()
+                        if 0 <= delta <= (dur if dur > 0 else 7200):
+                            base_pos += delta
+                    pos = min(dur, base_pos) if dur > 0 else base_pos
+            except Exception as e:
+                app_logger.debug(f"[MediaController] Timeline calc notice: {e}")
 
             app_id = curr.source_app_user_model_id or ""
             clean_app = app_id.split("!")[0].split(".exe")[0].split("\\")[-1]

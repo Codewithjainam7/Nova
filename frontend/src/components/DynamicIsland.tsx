@@ -40,6 +40,7 @@ export const DynamicIsland: React.FC = () => {
   const [currentTime, setCurrentTime] = useState('');
   const [copied, setCopied] = useState(false);
   const [currentMedia, setCurrentMedia] = useState<MediaTrack | null>(null);
+  const [playbackPos, setPlaybackPos] = useState<number>(0);
   const [phoneStats, setPhoneStats] = useState<PhoneTelemetry>({
     connected: false,
     battery: null,
@@ -109,6 +110,7 @@ export const DynamicIsland: React.FC = () => {
           if (isMounted) {
             if (data.success && data.media && data.media.title) {
               setCurrentMedia(data.media);
+              setPlaybackPos(data.media.position || 0);
             } else {
               setCurrentMedia(null);
             }
@@ -125,6 +127,18 @@ export const DynamicIsland: React.FC = () => {
       clearInterval(mediaInterval);
     };
   }, []);
+
+  // Real-time 1s client playback ticker for fluid second-by-second updates
+  useEffect(() => {
+    if (!currentMedia || currentMedia.status !== 'playing') return;
+    const ticker = setInterval(() => {
+      setPlaybackPos((prev) => {
+        if (currentMedia.duration && prev >= currentMedia.duration) return prev;
+        return Math.round((prev + 1) * 10) / 10;
+      });
+    }, 1000);
+    return () => clearInterval(ticker);
+  }, [currentMedia?.status, currentMedia?.duration]);
 
   const handleMediaControl = async (e: React.MouseEvent, action: 'toggle' | 'next' | 'prev') => {
     e.stopPropagation();
@@ -152,14 +166,14 @@ export const DynamicIsland: React.FC = () => {
     return `${m}:${s < 10 ? '0' : ''}${s}`;
   };
 
-  // Dynamic Height calculation
+  // Dynamic Height calculation - Generous breathing room for media + input + chips + footer
   const expandedHeight = recentResponse
-    ? 215
+    ? 225
     : showFolderPicker
-    ? 220
+    ? 230
     : currentMedia
-    ? 256
-    : 188;
+    ? 305
+    : 190;
 
   // Tell Electron what height to set based on state
   useEffect(() => {
@@ -653,81 +667,107 @@ export const DynamicIsland: React.FC = () => {
               ) : (
                 /* Contextual Presentation 2: Spotlight Command Input & Quick Chips */
                 <>
-                  {/* iOS Dynamic Island Style Now Playing Deck */}
+                  {/* Apple iOS Dynamic Island Style Now Playing Deck */}
                   {currentMedia && (
-                    <div className="mb-2 p-2 rounded-xl bg-gradient-to-r from-cyan-950/45 via-slate-900/75 to-purple-950/40 border border-cyan-500/35 shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)] flex items-center gap-2.5">
-                      {/* Left: 38x38 Album Art */}
-                      <div className="w-[38px] h-[38px] rounded-lg overflow-hidden bg-black/70 border border-cyan-500/40 shrink-0 shadow-[0_0_10px_rgba(6,182,212,0.25)] flex items-center justify-center relative">
-                        {currentMedia.thumbnail ? (
-                          <img src={currentMedia.thumbnail} alt={currentMedia.title} className="w-full h-full object-cover" />
-                        ) : (
-                          <Music className="w-4 h-4 text-cyan-300" />
-                        )}
-                      </div>
-
-                      {/* Middle: Track Title, Artist, & Live Scrubber */}
-                      <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
-                        <div className="flex items-center justify-between gap-1.5">
-                          <span className="text-[11px] font-semibold text-white truncate max-w-[210px]">
-                            {currentMedia.title}
-                          </span>
-                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/30 shrink-0">
-                            {currentMedia.app}
-                          </span>
-                        </div>
-                        <div className="flex items-center justify-between text-[10px] text-cyan-200/70">
-                          <span className="truncate max-w-[150px]">{currentMedia.artist}</span>
-                          {currentMedia.duration > 0 && (
-                            <span className="font-mono text-[9px] text-white/50 shrink-0">
-                              {formatTime(currentMedia.position)} / {formatTime(currentMedia.duration)}
-                            </span>
+                    <div className="mb-2 px-1 py-0.5 flex flex-col gap-1.5">
+                      {/* Top Row: Artwork, Song Info, and Live Sound Wave */}
+                      <div className="flex items-center gap-3">
+                        {/* 46x46 Premium Album Art with Soft Shadow */}
+                        <div className="w-[46px] h-[46px] rounded-2xl overflow-hidden bg-zinc-900 shadow-md shadow-black/80 ring-1 ring-white/10 shrink-0 flex items-center justify-center relative">
+                          {currentMedia.thumbnail ? (
+                            <img src={currentMedia.thumbnail} alt={currentMedia.title} className="w-full h-full object-cover" />
+                          ) : (
+                            <Music className="w-5 h-5 text-white/70" />
                           )}
                         </div>
 
-                        {/* Scrubber Progress Bar */}
-                        {currentMedia.duration > 0 && (
-                          <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden mt-0.5">
-                            <div
-                              className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-all duration-300"
-                              style={{ width: `${Math.min(100, Math.max(0, (currentMedia.position / currentMedia.duration) * 100))}%` }}
-                            />
+                        {/* Title, Artist & Source */}
+                        <div className="flex-1 min-w-0 flex flex-col justify-center">
+                          <span className="text-[13px] font-semibold text-white tracking-tight truncate leading-tight">
+                            {currentMedia.title}
+                          </span>
+                          <div className="flex items-center gap-1.5 mt-0.5">
+                            <span className="text-[11px] text-zinc-400 font-medium truncate">
+                              {currentMedia.artist}
+                            </span>
+                            <span className="text-[9px] text-zinc-600">•</span>
+                            <span className="text-[10px] text-zinc-500 font-normal truncate">
+                              {currentMedia.app}
+                            </span>
                           </div>
-                        )}
+                        </div>
+
+                        {/* Subtle Apple-style bouncing audio equalizer */}
+                        <div className="flex gap-1 items-end h-4 px-1 shrink-0">
+                          {[
+                            { dur: 0.5, h: [4, 14, 6, 16, 4] },
+                            { dur: 0.65, h: [8, 4, 15, 6, 8] },
+                            { dur: 0.45, h: [12, 6, 16, 5, 12] },
+                            { dur: 0.7, h: [6, 15, 4, 12, 6] }
+                          ].map((b, i) => (
+                            <motion.span
+                              key={i}
+                              animate={{ height: currentMedia.status === 'playing' ? b.h : 3 }}
+                              transition={{ repeat: Infinity, duration: b.dur, ease: "easeInOut" }}
+                              className="w-[2.5px] rounded-full bg-cyan-400"
+                            />
+                          ))}
+                        </div>
                       </div>
 
-                      {/* Right: Playback Controls */}
-                      <div className="flex items-center gap-1 shrink-0 ml-0.5">
+                      {/* Middle Row: Ultra-thin Minimal Scrubber & Exact Timestamps */}
+                      <div className="flex flex-col gap-1 px-0.5">
+                        <div className="w-full h-[3px] bg-white/15 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-white rounded-full transition-all duration-300"
+                            style={{
+                              width: `${currentMedia.duration > 0 ? Math.min(100, Math.max(0, (playbackPos / currentMedia.duration) * 100)) : 0}%`
+                            }}
+                          />
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-zinc-400 font-mono tracking-wider">
+                          <span>{formatTime(playbackPos)}</span>
+                          <span>
+                            {currentMedia.duration > 0
+                              ? `-${formatTime(Math.max(0, currentMedia.duration - playbackPos))}`
+                              : formatTime(0)}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Bottom Row: Minimalist Transport Controls */}
+                      <div className="flex items-center justify-center gap-7 py-0.5">
                         <button
                           onClick={(e) => handleMediaControl(e, 'prev')}
                           title="Previous Track"
-                          className="p-1 rounded-md text-white/60 hover:text-cyan-300 hover:bg-white/10 transition-colors"
+                          className="text-zinc-300 hover:text-white transition-all active:scale-90"
                         >
-                          <SkipBack className="w-3.5 h-3.5 fill-current" />
+                          <SkipBack className="w-5 h-5 fill-current" />
                         </button>
                         <button
                           onClick={(e) => handleMediaControl(e, 'toggle')}
                           title={currentMedia.status === 'playing' ? "Pause" : "Play"}
-                          className="p-1.5 rounded-md bg-cyan-500/25 hover:bg-cyan-500/40 text-cyan-300 border border-cyan-400/50 shadow-[0_0_8px_rgba(6,182,212,0.25)] transition-all"
+                          className="p-2 rounded-full bg-white text-black hover:scale-105 active:scale-95 transition-all shadow-md shadow-white/10"
                         >
                           {currentMedia.status === 'playing' ? (
-                            <Pause className="w-3.5 h-3.5 fill-current" />
+                            <Pause className="w-4 h-4 fill-black" />
                           ) : (
-                            <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                            <Play className="w-4 h-4 fill-black ml-0.5" />
                           )}
                         </button>
                         <button
                           onClick={(e) => handleMediaControl(e, 'next')}
                           title="Next Track"
-                          className="p-1 rounded-md text-white/60 hover:text-cyan-300 hover:bg-white/10 transition-colors"
+                          className="text-zinc-300 hover:text-white transition-all active:scale-90"
                         >
-                          <SkipForward className="w-3.5 h-3.5 fill-current" />
+                          <SkipForward className="w-5 h-5 fill-current" />
                         </button>
                       </div>
                     </div>
                   )}
 
                   {/* Spotlight Command Input Bar */}
-                  <form onSubmit={handleSubmit} className="relative w-full">
+                  <form onSubmit={handleSubmit} className="relative w-full my-1">
                     <div className="relative flex items-center">
                       <input
                         ref={inputRef}
@@ -810,7 +850,7 @@ export const DynamicIsland: React.FC = () => {
                   </AnimatePresence>
 
                   {/* Quick Action Smart Chips */}
-                  <div className="flex items-center gap-1.5 overflow-x-auto pt-0.5 no-scrollbar">
+                  <div className="flex items-center gap-1.5 overflow-x-auto my-1 no-scrollbar">
                     {/* Organize Chip */}
                     <motion.button
                       whileHover={{ scale: 1.03 }}
@@ -896,7 +936,7 @@ export const DynamicIsland: React.FC = () => {
               )}
 
               {/* Futuristic Micro-Telemetry Footer */}
-              <div className="flex items-center justify-between text-[10px] text-white/40 pt-1.5 border-t border-white/[0.08] font-mono">
+              <div className="flex items-center justify-between text-[10px] text-white/40 pt-2 mt-auto border-t border-white/[0.08] font-mono">
                 <span className="flex items-center gap-1.5">
                   <span className={clsx(
                     "w-1.5 h-1.5 rounded-full",

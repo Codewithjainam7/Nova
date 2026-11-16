@@ -4,6 +4,31 @@ const http = require('http');
 const fs = require('fs');
 const { spawn } = require('child_process');
 
+// Prevent EPIPE crashes when launched from detached or closed CLI pipes
+if (process.stdout) {
+  process.stdout.on('error', (err) => {
+    if (err.code === 'EPIPE') return;
+  });
+}
+if (process.stderr) {
+  process.stderr.on('error', (err) => {
+    if (err.code === 'EPIPE') return;
+  });
+}
+process.on('uncaughtException', (err) => {
+  if (err && err.code === 'EPIPE') return;
+  console.error('[Electron Uncaught Exception]:', err);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[Electron Unhandled Rejection]:', reason);
+});
+
+function safeLog(...args) {
+  try {
+    console.log(...args);
+  } catch (e) {}
+}
+
 let mainWindow = null;
 let islandWindow = null;
 let tray = null;
@@ -300,11 +325,19 @@ function createTray() {
 }
 
 function toggleIsland() {
-  if (!islandWindow || islandWindow.isDestroyed()) return;
-  lastIslandToggle = Date.now();
-  islandWindow.show();
-  islandWindow.focus();
-  islandWindow.webContents.send('shortcut-triggered', 'toggle');
+  try {
+    if (!islandWindow || islandWindow.isDestroyed()) return;
+    lastIslandToggle = Date.now();
+    if (!islandWindow.isVisible()) {
+      islandWindow.show();
+    }
+    islandWindow.focus();
+    if (islandWindow.webContents && !islandWindow.webContents.isDestroyed()) {
+      islandWindow.webContents.send('shortcut-triggered', 'toggle');
+    }
+  } catch (err) {
+    safeLog('[Electron] toggleIsland notice:', err);
+  }
 }
 
 function triggerOrganizeDownloads() {
@@ -322,11 +355,11 @@ function triggerOrganizeDownloads() {
       let data = '';
       res.on('data', (chunk) => (data += chunk));
       res.on('end', () => {
-        console.log('[Tray] Organized Downloads response:', data);
+        safeLog('[Tray] Organized Downloads response:', data);
       });
     }
   );
-  req.on('error', (e) => console.error('[Tray] Failed to request organize downloads:', e));
+  req.on('error', (e) => safeLog('[Tray] Failed to request organize downloads:', e));
   req.write(postData);
   req.end();
 }
@@ -346,12 +379,12 @@ function registerShortcuts() {
   islandKeys.forEach((key) => {
     try {
       const reg = globalShortcut.register(key, () => {
-        console.log(`[Shortcut] Triggered: ${key}`);
+        safeLog(`[Shortcut] Triggered: ${key}`);
         toggleIsland();
       });
-      console.log(`[Shortcut] Registered ${key}:`, reg);
+      safeLog(`[Shortcut] Registered ${key}:`, reg);
     } catch (err) {
-      console.warn(`[Shortcut] Failed to register ${key}:`, err);
+      safeLog(`[Shortcut] Failed to register ${key}:`, err);
     }
   });
 
@@ -373,9 +406,9 @@ function registerShortcuts() {
           }
         }
       });
-      console.log(`[Shortcut] Registered ${key}:`, reg);
+      safeLog(`[Shortcut] Registered ${key}:`, reg);
     } catch (err) {
-      console.warn(`[Shortcut] Failed to register ${key}:`, err);
+      safeLog(`[Shortcut] Failed to register ${key}:`, err);
     }
   });
 }
@@ -404,7 +437,7 @@ ipcMain.on('island-expand', (_event, expanded, customHeight) => {
 
   if (expanded) {
     const targetWidth = 490;
-    const targetHeight = customHeight || 200;
+    const targetHeight = customHeight || 305;
     const targetX = Math.round((screenWidth - targetWidth) / 2);
     islandWindow.setBounds({ x: targetX, y: 10, width: targetWidth, height: targetHeight });
   } else {
