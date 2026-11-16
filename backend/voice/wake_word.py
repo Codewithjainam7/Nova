@@ -20,9 +20,10 @@ from typing import Optional, Callable
 import speech_recognition as sr
 from backend.core.logger import app_logger
 
-# Phonetic & natural regex variations of "Hey ADA"
+# Strict wake word regex: requires explicit "Hey Ada" / "Hi Ada" / "Hello Ada" / "OK Ada"
+# or the word "Ada" spoken entirely by itself. Never triggers on ambient conversation words.
 WAKE_REGEX = re.compile(
-    r'\b(?:hey|hi|hello|ok|okay|ay)?\s*(?:ada|ayda|aida|eda|ida|adda|ahda|aada|a\.d\.a\.)\b[\s,.:;!?]*',
+    r'(?:\b(?:hey|hi|hello|ok|okay)\s+(?:ada|ayda|aida)\b|^\s*(?:ada|ayda|aida)[\s,.:;!?]*$)',
     re.IGNORECASE
 )
 
@@ -110,8 +111,8 @@ class WakeWordService:
         raw_pcm = audio_data.get_raw_data()
         rms = calculate_rms(raw_pcm)
         app_logger.debug(f"[WakeWord] Captured audio chunk RMS: {rms:.1f}")
-        if rms < 100:
-            # Silence, ambient room noise, typing or fan acoustics - ignore
+        if rms < 220:
+            # Ambient room murmur, distant speech, fan noise - ignore completely
             return ""
 
         wav_bytes = audio_data.get_wav_data(convert_rate=16000, convert_width=2)
@@ -126,7 +127,7 @@ class WakeWordService:
                     model="whisper-large-v3-turbo",
                     response_format="json",
                     language="en",
-                    prompt="Hey Ada. ADA is an AI assistant."
+                    prompt=None  # Never pass sentences in prompt to prevent Whisper echo hallucinations
                 )
                 text = (res.text or "").strip()
                 # Filter out known Whisper silence hallucinations
@@ -153,8 +154,8 @@ class WakeWordService:
             with self.microphone as source:
                 app_logger.info("[WakeWord] Calibrating microphone for ambient room acoustics...")
                 self.recognizer.adjust_for_ambient_noise(source, duration=0.8)
-                if self.recognizer.energy_threshold < 200:
-                    self.recognizer.energy_threshold = 200
+                if self.recognizer.energy_threshold < 350:
+                    self.recognizer.energy_threshold = 350
                 app_logger.info(f"[WakeWord] Calibrated. Baseline energy threshold: {self.recognizer.energy_threshold:.1f}")
         except Exception as e:
             app_logger.error(f"[WakeWord] Failed to initialize microphone: {e}")
@@ -232,11 +233,12 @@ class WakeWordService:
         time.sleep(0.18)
         self.set_speaking(False)
 
-        # If user spoke the directive directly in one breath (e.g. "Hey Ada what is my phone battery")
-        if direct_command and len(direct_command.split()) >= 2:
-            app_logger.info(f"[WakeWord] Direct command dispatched immediately: '{direct_command}'")
+        # If user spoke a REAL directive directly in one breath (e.g. "Hey Ada lock my laptop")
+        direct_clean = WAKE_REGEX.sub('', direct_command).strip().strip(",.-: ")
+        if direct_clean and len(direct_clean.split()) >= 2 and direct_clean.lower() not in ["ada", "hey ada", "ai assistant", "ada is an ai assistant."]:
+            app_logger.info(f"[WakeWord] Direct command dispatched immediately: '{direct_clean}'")
             if self.on_directive_ready:
-                self.on_directive_ready(direct_command)
+                self.on_directive_ready(direct_clean)
             return
 
         # Otherwise, user just said "Hey Ada" -> update UI to "Listening to you, Boss..." and listen!
@@ -267,9 +269,12 @@ class WakeWordService:
             followup_text = self._transcribe_audio(followup_audio)
             if followup_text:
                 # Clean any accidental repetition of wake phrase
-                clean_directive = WAKE_REGEX.sub('', followup_text).strip() or followup_text.strip()
-                clean_directive = clean_directive.strip(",.-: ")
-                if clean_directive and len(clean_directive) > 2 and clean_directive.lower() not in HALLUCINATION_BLACK_LIST:
+                clean_directive = WAKE_REGEX.sub('', followup_text).strip().strip(",.-: ")
+                if not clean_directive or clean_directive.lower() in ["hey ada", "ada", "hey", "hello", "hi"]:
+                    app_logger.info(f"[WakeWord] Follow-up ignored as pure wake repetition: '{followup_text}'")
+                    return
+
+                if len(clean_directive) > 2 and clean_directive.lower() not in HALLUCINATION_BLACK_LIST:
                     app_logger.info(f"[WakeWord] Follow-up directive heard: '{clean_directive}'")
                     if self.on_directive_ready:
                         self.on_directive_ready(clean_directive)
