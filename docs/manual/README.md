@@ -1,8 +1,14 @@
 # ADA // Autonomous AI Operating System - Master Documentation
 
-Welcome to the comprehensive technical documentation for **ADA (Mark IV)**, the next-generation autonomous AI Operating System.
+Welcome to the comprehensive technical documentation for **ADA (Mark VII)**, the next-generation autonomous AI Operating System.
 
 ## Complete Documentation Index
+
+### Mark VII Advanced Systems
+- [Dynamic Island & Hotkey Morphing Engine](../architecture/DYNAMIC_ISLAND.md)
+- [Autonomous 'Hey ADA' Verbal Wake Word Engine](12_VOICE_PIPELINE_ORCHESTRATION.md)
+- [100% Genuine Hardware & Wi-Fi ADB Telemetry](28_BENCHMARKS_AND_PERFORMANCE.md)
+- [Studio Neural Voice (Sonia HD Persona)](11_TEXT_TO_SPEECH_TTS.md)
 
 ### Core Architecture & Foundations
 - [Chapter 01: Getting Started & Installation Guide](01_GETTING_STARTED.md)
