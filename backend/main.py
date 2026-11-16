@@ -144,6 +144,29 @@ async def lifespan(app: FastAPI):
         app_logger.info("Autonomous Wake Word Listener Engine successfully initialized and active.")
     except Exception as e:
         app_logger.error(f"Failed to start Wake Word Engine: {e}")
+
+    # Start Autonomous Call Screening Telephony Guardian
+    try:
+        from backend.devices.call_screening import call_screener
+        loop_cs = asyncio.get_running_loop()
+
+        def _on_call_event(event_data: dict):
+            try:
+                asyncio.run_coroutine_threadsafe(
+                    events_ws_manager.broadcast(json.dumps({
+                        "type": "CALL_SCREENING_EVENT",
+                        **event_data
+                    })),
+                    loop_cs
+                )
+            except Exception as ce:
+                app_logger.debug(f"Call event broadcast notice: {ce}")
+
+        call_screener.register_callback(_on_call_event)
+        app.state.call_screen_task = asyncio.create_task(call_screener.start_monitoring())
+        app_logger.info("Autonomous Mobile Telephony Guardian initialized.")
+    except Exception as e:
+        app_logger.error(f"Failed to start Call Screening: {e}")
     
     app_logger.info(f"ADA Runtime Successfully Booted in {(time.time() - boot_time) * 1000:.2f}ms")
     app_logger.info(f"Loaded Modules: SettingsSystem, NovaKernel, EventBus, ChatSystem, ProviderManager, AutoADB")
@@ -162,6 +185,13 @@ async def lifespan(app: FastAPI):
     try:
         if hasattr(app.state, "wake_service") and app.state.wake_service:
             app.state.wake_service.stop()
+    except Exception:
+        pass
+    try:
+        if hasattr(app.state, "call_screen_task"):
+            from backend.devices.call_screening import call_screener
+            call_screener.stop_monitoring()
+            app.state.call_screen_task.cancel()
     except Exception:
         pass
     await kernel.shutdown()
@@ -722,3 +752,60 @@ async def toggle_wake_status():
             wake_service.start()
         return wake_service.status()
     return {"running": False}
+
+@app.get("/api/devices/call-screening/status")
+async def get_call_screening_status():
+    from backend.devices.call_screening import call_screener
+    return {
+        "enabled": call_screener.enabled,
+        "is_monitoring": call_screener.is_monitoring,
+        "unattended_seconds": call_screener.unattended_seconds,
+        "current_call_state": call_screener.current_state,
+        "active_caller": call_screener.active_caller_name
+    }
+
+@app.post("/api/devices/call-screening/toggle")
+async def toggle_call_screening():
+    from backend.devices.call_screening import call_screener
+    call_screener.enabled = not call_screener.enabled
+    return {
+        "enabled": call_screener.enabled,
+        "status": "ACTIVE" if call_screener.enabled else "STANDBY"
+    }
+
+@app.get("/api/devices/call-screening/logs")
+async def get_call_screening_logs():
+    from backend.devices.call_screening import call_screener
+    records = []
+    if os.path.exists(call_screener.log_file):
+        try:
+            with open(call_screener.log_file, "r", encoding="utf-8") as f:
+                records = json.load(f)
+        except Exception:
+            records = []
+    return {"logs": records}
+
+@app.get("/api/system/media/current")
+async def get_current_system_media():
+    """Returns currently playing media metadata (track, artist, thumbnail, duration) via GSMTC."""
+    from backend.island.media_controller import system_media_controller
+    media = await system_media_controller.get_current_media()
+    return {"success": True, "media": media}
+
+class MediaControlPayload(BaseModel):
+    action: str  # toggle, next, prev
+
+@app.post("/api/system/media/control")
+async def control_system_media(payload: MediaControlPayload):
+    """Executes media playback control (toggle play/pause, next, previous)."""
+    from backend.island.media_controller import system_media_controller
+    act = (payload.action or "").lower().strip()
+    result = False
+    if act in ["toggle", "play", "pause"]:
+        result = await system_media_controller.toggle_play_pause()
+    elif act in ["next", "skip"]:
+        result = await system_media_controller.skip_next()
+    elif act in ["prev", "previous"]:
+        result = await system_media_controller.skip_previous()
+    return {"success": result, "action": act}
+

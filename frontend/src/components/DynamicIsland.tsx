@@ -7,7 +7,8 @@ import {
   Mic, BrainCircuit, Globe, Monitor, ScanEye, CheckCircle,
   XCircle, ExternalLink, ArrowUp, ChevronUp, ChevronDown,
   MessageSquare, Zap, FolderSync, Volume2, X, Clock,
-  Smartphone, Shield, Copy, Check, Sparkles
+  Smartphone, Shield, Copy, Check, Sparkles,
+  Play, Pause, SkipForward, SkipBack, Music
 } from 'lucide-react';
 import clsx from 'clsx';
 
@@ -15,6 +16,17 @@ interface PhoneTelemetry {
   connected: boolean;
   battery: number | null;
   deviceId: string | null;
+}
+
+interface MediaTrack {
+  title: string;
+  artist: string;
+  album: string;
+  status: 'playing' | 'paused' | 'stopped' | 'idle';
+  app: string;
+  position: number;
+  duration: number;
+  thumbnail: string | null;
 }
 
 export const DynamicIsland: React.FC = () => {
@@ -27,6 +39,7 @@ export const DynamicIsland: React.FC = () => {
   const [recentResponse, setRecentResponse] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState('');
   const [copied, setCopied] = useState(false);
+  const [currentMedia, setCurrentMedia] = useState<MediaTrack | null>(null);
   const [phoneStats, setPhoneStats] = useState<PhoneTelemetry>({
     connected: false,
     battery: null,
@@ -85,14 +98,77 @@ export const DynamicIsland: React.FC = () => {
     return () => clearInterval(telInterval);
   }, []);
 
+  // Poll real-time system media playback (GSMTC)
+  useEffect(() => {
+    let isMounted = true;
+    const fetchMedia = async () => {
+      try {
+        const res = await fetch('http://localhost:8000/api/system/media/current');
+        if (res.ok) {
+          const data = await res.json();
+          if (isMounted) {
+            if (data.success && data.media && data.media.title) {
+              setCurrentMedia(data.media);
+            } else {
+              setCurrentMedia(null);
+            }
+          }
+        }
+      } catch {
+        // Backend temporarily busy
+      }
+    };
+    fetchMedia();
+    const mediaInterval = setInterval(fetchMedia, 2000);
+    return () => {
+      isMounted = false;
+      clearInterval(mediaInterval);
+    };
+  }, []);
+
+  const handleMediaControl = async (e: React.MouseEvent, action: 'toggle' | 'next' | 'prev') => {
+    e.stopPropagation();
+    if (action === 'toggle' && currentMedia) {
+      setCurrentMedia({
+        ...currentMedia,
+        status: currentMedia.status === 'playing' ? 'paused' : 'playing'
+      });
+    }
+    try {
+      await fetch('http://localhost:8000/api/system/media/control', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action })
+      });
+    } catch (err) {
+      console.warn('Media control failed:', err);
+    }
+  };
+
+  const formatTime = (seconds: number) => {
+    if (!seconds || isNaN(seconds)) return '0:00';
+    const m = Math.floor(seconds / 60);
+    const s = Math.floor(seconds % 60);
+    return `${m}:${s < 10 ? '0' : ''}${s}`;
+  };
+
+  // Dynamic Height calculation
+  const expandedHeight = recentResponse
+    ? 215
+    : showFolderPicker
+    ? 220
+    : currentMedia
+    ? 256
+    : 188;
+
   // Tell Electron what height to set based on state
   useEffect(() => {
     try {
       if (typeof window !== 'undefined' && (window as any).electronAPI) {
         if (expanded) {
-          (window as any).electronAPI.setIslandExpanded(true, 300);
+          (window as any).electronAPI.setIslandExpanded(true, expandedHeight);
         } else {
-          (window as any).electronAPI.setIslandExpanded(false, 52);
+          (window as any).electronAPI.setIslandExpanded(false, 44);
         }
       }
     } catch {
@@ -101,7 +177,7 @@ export const DynamicIsland: React.FC = () => {
     if (expanded && inputRef.current && !recentResponse) {
       setTimeout(() => inputRef.current?.focus(), 120);
     }
-  }, [expanded, showFolderPicker, recentResponse]);
+  }, [expanded, showFolderPicker, recentResponse, expandedHeight]);
 
   // Automatically expand capsule when wake word triggers voice-listening
   useEffect(() => {
@@ -251,9 +327,6 @@ export const DynamicIsland: React.FC = () => {
     }
   };
 
-  // Dynamic Height calculation
-  const expandedHeight = recentResponse ? 215 : showFolderPicker ? 220 : 188;
-
   // Spring physics constants
   const springTransition = {
     type: "spring" as const,
@@ -265,15 +338,16 @@ export const DynamicIsland: React.FC = () => {
   const isVoiceActive = isListening || islandState === 'voice-listening';
 
   return (
-    <div className="w-full h-full m-0 p-0 overflow-hidden bg-transparent select-none flex items-center justify-center">
+    <div className="w-full h-full m-0 p-0 overflow-hidden bg-transparent select-none flex items-start justify-center">
       {/* Liquid Capsule Morph Container */}
       <motion.div
         layout
         initial={false}
+        style={{ transformOrigin: "top center" }}
         animate={
           expanded
             ? { width: 490, height: expandedHeight, borderRadius: 24 }
-            : { width: 330, height: 44, borderRadius: 22 }
+            : { width: currentMedia && !isVoiceActive ? 360 : 330, height: 44, borderRadius: 22 }
         }
         transition={springTransition}
         onClick={() => !expanded && setExpanded(true)}
@@ -292,80 +366,121 @@ export const DynamicIsland: React.FC = () => {
       >
         {/* Top Header / Collapsed Capsule Bar */}
         <div className="flex items-center justify-between px-3.5 h-[44px] w-full shrink-0">
-          {/* Left: Status Icon & Live Label */}
-          <div className="flex items-center gap-2.5 overflow-hidden">
-            <div className="w-5 h-5 flex items-center justify-center shrink-0">
-              {getStatusIcon()}
-            </div>
+          {/* Left: Status Icon & Live Label / Now Playing Track */}
+          <div className="flex items-center gap-2.5 overflow-hidden flex-1 mr-2">
+            {currentMedia && !isVoiceActive && !expanded ? (
+              <div className="flex items-center gap-2 overflow-hidden">
+                {/* Mini Album Art Thumbnail */}
+                <div className="w-5 h-5 rounded-md overflow-hidden bg-cyan-950/80 border border-cyan-500/40 shrink-0 flex items-center justify-center shadow-[0_0_8px_rgba(6,182,212,0.3)]">
+                  {currentMedia.thumbnail ? (
+                    <img src={currentMedia.thumbnail} alt="Album Art" className="w-full h-full object-cover" />
+                  ) : (
+                    <Music className="w-3 h-3 text-cyan-300" />
+                  )}
+                </div>
 
-            <AnimatePresence mode="wait">
-              <motion.div
-                key={
-                  isVoiceActive
-                    ? 'voice-listening'
-                    : islandState === 'idle'
-                    ? 'idle-text'
-                    : (islandMessage || islandState)
-                }
-                initial={{ opacity: 0, y: 4 }}
-                animate={{ opacity: 1, y: 0 }}
-                exit={{ opacity: 0, y: -4 }}
-                transition={{ duration: 0.16 }}
-                className={clsx(
-                  "font-medium tracking-wide truncate flex items-center gap-1.5",
-                  expanded ? "text-xs text-white max-w-[260px]" : "text-xs text-white max-w-[170px]"
-                )}
-              >
-                {isVoiceActive ? (
-                  <span className="text-cyan-300 font-semibold flex items-center gap-1.5 animate-pulse">
-                    <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
-                    {islandMessage || (isListening ? "Listening..." : "Listening to you, Boss...")}
+                {/* Track Title & Artist */}
+                <div className="flex items-center gap-1.5 overflow-hidden text-xs">
+                  <span className="font-semibold text-white truncate max-w-[140px]">
+                    {currentMedia.title}
                   </span>
-                ) : islandState === 'idle' ? (
-                  <span className="bg-gradient-to-r from-white via-slate-100 to-cyan-300 bg-clip-text text-transparent font-semibold flex items-center gap-1.5">
-                    <span>ADA</span>
-                    <span className="text-cyan-500/80">•</span>
-                    <span className="text-cyan-200/90 font-normal">NEURAL LINK</span>
+                  <span className="text-[10px] text-cyan-400/80 shrink-0">•</span>
+                  <span className="text-[10px] text-cyan-200/80 font-normal truncate max-w-[80px]">
+                    {currentMedia.artist}
                   </span>
-                ) : (
-                  <span className="text-cyan-300 font-semibold truncate">
-                    {islandMessage || islandState.toUpperCase()}
-                  </span>
-                )}
-              </motion.div>
-            </AnimatePresence>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="w-5 h-5 flex items-center justify-center shrink-0">
+                  {getStatusIcon()}
+                </div>
+
+                <AnimatePresence mode="wait">
+                  <motion.div
+                    key={
+                      isVoiceActive
+                        ? 'voice-listening'
+                        : islandState === 'idle'
+                        ? 'idle-text'
+                        : (islandMessage || islandState)
+                    }
+                    initial={{ opacity: 0, y: 4 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -4 }}
+                    transition={{ duration: 0.16 }}
+                    className={clsx(
+                      "font-medium tracking-wide truncate flex items-center gap-1.5",
+                      expanded ? "text-xs text-white max-w-[260px]" : "text-xs text-white max-w-[170px]"
+                    )}
+                  >
+                    {isVoiceActive ? (
+                      <span className="text-cyan-300 font-semibold flex items-center gap-1.5 animate-pulse">
+                        <span className="w-1.5 h-1.5 rounded-full bg-cyan-400" />
+                        {islandMessage || (isListening ? "Listening..." : "Listening to you, Boss...")}
+                      </span>
+                    ) : islandState === 'idle' ? (
+                      <span className="bg-gradient-to-r from-white via-slate-100 to-cyan-300 bg-clip-text text-transparent font-semibold flex items-center gap-1.5">
+                        <span>ADA</span>
+                        <span className="text-cyan-500/80">•</span>
+                        <span className="text-cyan-200/90 font-normal">NEURAL LINK</span>
+                      </span>
+                    ) : (
+                      <span className="text-cyan-300 font-semibold truncate">
+                        {islandMessage || islandState.toUpperCase()}
+                      </span>
+                    )}
+                  </motion.div>
+                </AnimatePresence>
+              </>
+            )}
           </div>
 
           {/* Right Header Controls */}
           {!expanded ? (
             <div className="flex items-center gap-2">
-              {/* Interactive Voice Mic Button */}
-              <button
-                onClick={toggleVoiceMode}
-                title="Trigger Voice Directive"
-                className={clsx(
-                  "p-1.5 rounded-full transition-all duration-200 flex items-center justify-center",
-                  isListening
-                    ? "bg-cyan-500/30 text-cyan-300 shadow-[0_0_12px_#06b6d4]"
-                    : "text-white/60 hover:text-cyan-300 hover:bg-white/10"
-                )}
-              >
-                <Mic className="w-3.5 h-3.5" />
-              </button>
+              {currentMedia && !isVoiceActive ? (
+                /* Quick Media Play/Pause in capsule */
+                <button
+                  onClick={(e) => handleMediaControl(e, 'toggle')}
+                  title={currentMedia.status === 'playing' ? "Pause Music" : "Play Music"}
+                  className="p-1 rounded-full text-cyan-300 hover:text-white hover:bg-white/10 transition-colors"
+                >
+                  {currentMedia.status === 'playing' ? (
+                    <Pause className="w-3 h-3 fill-current" />
+                  ) : (
+                    <Play className="w-3 h-3 fill-current ml-0.5" />
+                  )}
+                </button>
+              ) : (
+                /* Interactive Voice Mic Button */
+                <button
+                  onClick={toggleVoiceMode}
+                  title="Trigger Voice Directive"
+                  className={clsx(
+                    "p-1.5 rounded-full transition-all duration-200 flex items-center justify-center",
+                    isListening
+                      ? "bg-cyan-500/30 text-cyan-300 shadow-[0_0_12px_#06b6d4]"
+                      : "text-white/60 hover:text-cyan-300 hover:bg-white/10"
+                  )}
+                >
+                  <Mic className="w-3.5 h-3.5" />
+                </button>
+              )}
 
               {/* 5-Bar Liquid Dancing Equalizer */}
               <div className="flex gap-1 items-end h-3.5 px-0.5">
                 {[
-                  { color: "bg-cyan-400", activeDur: 0.45, idleDur: 1.1, activeH: [4, 15, 6, 17, 4], idleH: [3, 9, 4, 8, 3] },
-                  { color: "bg-sky-400", activeDur: 0.55, idleDur: 1.3, activeH: [8, 4, 16, 7, 8], idleH: [5, 3, 11, 4, 5] },
-                  { color: "bg-indigo-400", activeDur: 0.4, idleDur: 1.0, activeH: [14, 6, 18, 5, 14], idleH: [7, 12, 5, 9, 7] },
-                  { color: "bg-purple-400", activeDur: 0.6, idleDur: 1.4, activeH: [6, 17, 5, 13, 6], idleH: [4, 7, 10, 3, 4] },
-                  { color: "bg-cyan-300", activeDur: 0.5, idleDur: 1.2, activeH: [10, 5, 15, 8, 10], idleH: [3, 8, 4, 11, 3] }
+                  { color: "bg-cyan-400", activeDur: 0.45, idleDur: 1.1, activeH: [4, 15, 6, 17, 4], idleH: currentMedia ? [3, 4, 3, 4, 3] : [3, 9, 4, 8, 3] },
+                  { color: "bg-sky-400", activeDur: 0.55, idleDur: 1.3, activeH: [8, 4, 16, 7, 8], idleH: currentMedia ? [4, 3, 5, 3, 4] : [5, 3, 11, 4, 5] },
+                  { color: "bg-indigo-400", activeDur: 0.4, idleDur: 1.0, activeH: [14, 6, 18, 5, 14], idleH: currentMedia ? [5, 4, 6, 4, 5] : [7, 12, 5, 9, 7] },
+                  { color: "bg-purple-400", activeDur: 0.6, idleDur: 1.4, activeH: [6, 17, 5, 13, 6], idleH: currentMedia ? [3, 5, 4, 3, 3] : [4, 7, 10, 3, 4] },
+                  { color: "bg-cyan-300", activeDur: 0.5, idleDur: 1.2, activeH: [10, 5, 15, 8, 10], idleH: currentMedia ? [4, 3, 5, 4, 3] : [3, 8, 4, 11, 3] }
                 ].map((bar, idx) => (
                   <motion.span
                     key={idx}
-                    animate={{ height: isVoiceActive ? bar.activeH : bar.idleH }}
-                    transition={{ repeat: Infinity, duration: isVoiceActive ? bar.activeDur : bar.idleDur, ease: "easeInOut" }}
+                    animate={{ height: (currentMedia?.status === 'playing' || isVoiceActive) ? bar.activeH : bar.idleH }}
+                    transition={{ repeat: Infinity, duration: (currentMedia?.status === 'playing' || isVoiceActive) ? bar.activeDur : bar.idleDur, ease: "easeInOut" }}
                     className={clsx("w-[2px] rounded-full", bar.color)}
                   />
                 ))}
@@ -538,6 +653,79 @@ export const DynamicIsland: React.FC = () => {
               ) : (
                 /* Contextual Presentation 2: Spotlight Command Input & Quick Chips */
                 <>
+                  {/* iOS Dynamic Island Style Now Playing Deck */}
+                  {currentMedia && (
+                    <div className="mb-2 p-2 rounded-xl bg-gradient-to-r from-cyan-950/45 via-slate-900/75 to-purple-950/40 border border-cyan-500/35 shadow-[inset_0_1px_1px_rgba(255,255,255,0.15)] flex items-center gap-2.5">
+                      {/* Left: 38x38 Album Art */}
+                      <div className="w-[38px] h-[38px] rounded-lg overflow-hidden bg-black/70 border border-cyan-500/40 shrink-0 shadow-[0_0_10px_rgba(6,182,212,0.25)] flex items-center justify-center relative">
+                        {currentMedia.thumbnail ? (
+                          <img src={currentMedia.thumbnail} alt={currentMedia.title} className="w-full h-full object-cover" />
+                        ) : (
+                          <Music className="w-4 h-4 text-cyan-300" />
+                        )}
+                      </div>
+
+                      {/* Middle: Track Title, Artist, & Live Scrubber */}
+                      <div className="flex-1 min-w-0 flex flex-col justify-center gap-0.5">
+                        <div className="flex items-center justify-between gap-1.5">
+                          <span className="text-[11px] font-semibold text-white truncate max-w-[210px]">
+                            {currentMedia.title}
+                          </span>
+                          <span className="text-[9px] font-mono px-1.5 py-0.2 rounded bg-cyan-950/80 text-cyan-300 border border-cyan-500/30 shrink-0">
+                            {currentMedia.app}
+                          </span>
+                        </div>
+                        <div className="flex items-center justify-between text-[10px] text-cyan-200/70">
+                          <span className="truncate max-w-[150px]">{currentMedia.artist}</span>
+                          {currentMedia.duration > 0 && (
+                            <span className="font-mono text-[9px] text-white/50 shrink-0">
+                              {formatTime(currentMedia.position)} / {formatTime(currentMedia.duration)}
+                            </span>
+                          )}
+                        </div>
+
+                        {/* Scrubber Progress Bar */}
+                        {currentMedia.duration > 0 && (
+                          <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden mt-0.5">
+                            <div
+                              className="h-full bg-gradient-to-r from-cyan-400 to-purple-400 rounded-full transition-all duration-300"
+                              style={{ width: `${Math.min(100, Math.max(0, (currentMedia.position / currentMedia.duration) * 100))}%` }}
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Right: Playback Controls */}
+                      <div className="flex items-center gap-1 shrink-0 ml-0.5">
+                        <button
+                          onClick={(e) => handleMediaControl(e, 'prev')}
+                          title="Previous Track"
+                          className="p-1 rounded-md text-white/60 hover:text-cyan-300 hover:bg-white/10 transition-colors"
+                        >
+                          <SkipBack className="w-3.5 h-3.5 fill-current" />
+                        </button>
+                        <button
+                          onClick={(e) => handleMediaControl(e, 'toggle')}
+                          title={currentMedia.status === 'playing' ? "Pause" : "Play"}
+                          className="p-1.5 rounded-md bg-cyan-500/25 hover:bg-cyan-500/40 text-cyan-300 border border-cyan-400/50 shadow-[0_0_8px_rgba(6,182,212,0.25)] transition-all"
+                        >
+                          {currentMedia.status === 'playing' ? (
+                            <Pause className="w-3.5 h-3.5 fill-current" />
+                          ) : (
+                            <Play className="w-3.5 h-3.5 fill-current ml-0.5" />
+                          )}
+                        </button>
+                        <button
+                          onClick={(e) => handleMediaControl(e, 'next')}
+                          title="Next Track"
+                          className="p-1 rounded-md text-white/60 hover:text-cyan-300 hover:bg-white/10 transition-colors"
+                        >
+                          <SkipForward className="w-3.5 h-3.5 fill-current" />
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
                   {/* Spotlight Command Input Bar */}
                   <form onSubmit={handleSubmit} className="relative w-full">
                     <div className="relative flex items-center">

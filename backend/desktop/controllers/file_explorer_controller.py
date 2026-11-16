@@ -256,18 +256,12 @@ class FileExplorerController(AppController):
             except Exception as e:
                 app_logger.warning(f"Could not move {item} to {dest_file}: {e}")
 
-        # Open the organized folder in explorer so the user can visually see it
-        try:
-            os.startfile(folder_path)
-        except Exception:
-            pass
-
         folder_display = os.path.basename(folder_path.rstrip("\\/")) or folder_path
         if total_moved > 0:
             breakdown = ", ".join(f"{cnt} {cat}" for cat, cnt in sorted(moved_stats.items(), key=lambda x: -x[1]))
             self.last_result = (
                 f"Done, Boss. I've organized {total_moved} files in your {folder_display} folder into {len(moved_stats)} categories: "
-                f"{breakdown}. I also opened the folder for you."
+                f"{breakdown}."
             )
         else:
             self.last_result = f"Your {folder_display} folder is already organized, Boss. No loose files were found to sort."

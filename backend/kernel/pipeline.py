@@ -215,8 +215,11 @@ class KernelPipeline:
             plan = await planner.generate_plan(user_intent, context=execution_context)
             
             # Intercept Vision Queries
-            vision_keywords = ["screen", "see", "look", "what am i looking at", "what's on my", "what is on my"]
-            if any(kw in user_intent.lower() for kw in vision_keywords):
+            v_lower = user_intent.lower()
+            is_call_or_organize = any(ex in v_lower for ex in ["screening", "call", "screenshot", "organize", "lock screen", "lock the screen"])
+            vision_phrases = ["what's on my screen", "what is on my screen", "look at my screen", "what am i looking at", "describe my screen", "read my screen", "see my screen"]
+            is_vision_query = not is_call_or_organize and any(kw in v_lower for kw in vision_phrases)
+            if is_vision_query:
                 app_logger.info("Vision query detected. Bypassing execution phase.")
                 plan.tasks = []
                 
@@ -341,9 +344,8 @@ class KernelPipeline:
                 full_prompt = f"User Request: {user_intent}\nExecution Context: {execution_context}\n\nPlease provide a helpful response."
                 
                 # Multimodal Vision Intercept
-                vision_keywords = ["screen", "see", "look", "what am i looking at", "what's on my", "what is on my"]
                 images_to_attach = []
-                if any(kw in user_intent.lower() for kw in vision_keywords):
+                if is_vision_query:
                     await self._stream_progress(session, "Analyzing visual data...")
                     try:
                         import pyautogui

@@ -404,7 +404,7 @@ ipcMain.on('island-expand', (_event, expanded, customHeight) => {
 
   if (expanded) {
     const targetWidth = 490;
-    const targetHeight = Math.max(customHeight || 220, 220);
+    const targetHeight = customHeight || 200;
     const targetX = Math.round((screenWidth - targetWidth) / 2);
     islandWindow.setBounds({ x: targetX, y: 10, width: targetWidth, height: targetHeight });
   } else {
