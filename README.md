@@ -24,7 +24,7 @@
 [![Three.js](https://img.shields.io/badge/Three.js-0.160%2B-black.svg?style=for-the-badge&logo=threedotjs&logoColor=white)](https://threejs.org)
 [![License MIT](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 
-[Architecture](#system-architecture) • [Dynamic Island](#liquid-dynamic-island) • [Wake Word Engine](#autonomous-hey-ada-verbal-wake-engine) • [Live Telemetry](#100-genuine-real-time-telemetry) • [Desktop & Phone Automation](#cross-platform-automation-matrix) • [Quick Start](#installation--setup) • [Documentation Hub](#master-documentation-index)
+[Architecture](#system-architecture) • [Dynamic Island](#liquid-dynamic-island) • [Wake Word Engine](#autonomous-hey-ada-verbal-wake-engine) • [Acoustic Safety Shield](#acoustic-safety--anti-hallucination-shield) • [Live Telemetry](#100-genuine-real-time-telemetry) • [Desktop & Phone Automation](#cross-platform-automation-matrix) • [Quick Start](#installation--setup) • [Documentation Hub](#master-documentation-index)
 
 </div>
 
@@ -37,8 +37,9 @@
 Unlike traditional chatbots that remain trapped inside browser tabs, ADA integrates directly with your host operating system and mobile environment:
 - **Always-Available Dynamic Island**: A floating, screen-saver level liquid capsule centered at the top of your workspace that expands on hotkeys (<kbd>Alt+Space</kbd> / <kbd>F2</kbd>) or verbal cues.
 - **Autonomous Verbal Wake-Word Engine**: Ambient background listener that detects **"Hey ADA"** at the OS level, responds orally with **"Yes, Boss?"** in her signature British Sonia HD studio voice, and captures your spoken directive with **Groq Whisper-large-v3-turbo (~150ms)**.
+- **Acoustic Safety & Anti-Hallucination Shield**: Hardware RMS energy gating, zero-verb Whisper prompt priming, and silence hallucination filtering that eliminate accidental triggers or spontaneous executions.
 - **Genuine Hardware & ADB Telemetry**: Zero mocked or randomized metrics. Live monitoring of 16 host CPU threads, physical RAM consumption, and real-time battery status from connected Android devices over Wi-Fi ADB (`dumpsys battery`).
-- **Full Automation Matrix**: Native Windows UI controllers (Notepad, Calculator, File Explorer), Playwright headless/headed browser automations, and wireless Android phone control (screen wake, unlock, gesture dispatch, WhatsApp/Instagram messaging).
+- **Full Automation Matrix**: Native Windows UI controllers (Notepad, Calculator, File Explorer), Playwright headless/headed browser automations, and wireless Android phone control (screen wake, unlock, gesture dispatch, WhatsApp/Instagram messaging with safety interlocks).
 - **3D Holographic Neural Interface**: Interactive Three.js synaptic neural network with customizable HUD matrix, directive execution streams, and orbital particle physics.
 
 ---
@@ -65,10 +66,11 @@ flowchart TB
 
     subgraph Backend_Kernel ["Backend Layer (Python 3.11 + FastAPI + AsyncIO)"]
         API["FastAPI REST & WS Engine<br/>(Port 8000)"]
-        WAKE["WakeWordService Daemon<br/>(speech_recognition + PyAudio)"]
+        WAKE["WakeWordService Daemon<br/>(speech_recognition + RMS Gate)"]
         ROUTER["Capability Router & Planner<br/>(Intent Resolution)"]
         KERNEL["Nova Autonomous Kernel<br/>(Pipeline Execution)"]
         MEMORY["Hybrid Memory Engine<br/>(ChromaDB Vector + SQLite)"]
+        DEVICES["DeviceManager (ADB)<br/>(Safety Interlocks)"]
     end
 
     subgraph External_Cognition ["AI Intelligence Providers"]
@@ -86,11 +88,13 @@ flowchart TB
     DASHBOARD --> STORE
     ISLAND --> STORE
     HARDWARE -->|Real-time Poll| API
-    ANDROID <-->|Wireless ADB| API
+    ANDROID <-->|Wireless ADB| DEVICES
+    DEVICES <--> API
     KERNEL --> ROUTER
     ROUTER --> MEMORY
     ROUTER --> GROQ
     ROUTER --> GEMINI
+    ROUTER --> DEVICES
     API -->|Synthesized MP3/WAV| SPEAKER
     EDGE_TTS --> API
 ```
@@ -130,7 +134,7 @@ The Dynamic Island floats continuously at the top-center of your primary display
 
 ### 2. Autonomous "Hey ADA" Verbal Wake Engine
 
-ADA features a dedicated, low-latency background audio listener that operates system-wide, even when all windows are minimized or full-screen video games are active.
+ADA features a dedicated, low-latency background audio listener that operates system-wide, even when all windows are minimized or full-screen applications are running.
 
 ```mermaid
 sequenceDiagram
@@ -144,33 +148,60 @@ sequenceDiagram
     participant Island as Dynamic Island
 
     User->>Mic: "Hey ADA"
-    Mic->>Wake: Ambient Audio Buffer
-    Wake->>Wake: WAKE_REGEX Detection Match
+    Mic->>Wake: Ambient Audio Buffer (16kHz PCM)
+    Wake->>Wake: Check RMS Energy (Threshold > 100)
+    Wake->>Whisper: Transcribe with Zero-Verb Priming
+    Whisper-->>Wake: Recognized "Hey ADA"
     Wake->>Island: WS: WAKE_WORD_DETECTED ("Yes, Boss?")
-    Island->>Island: Morph to Expanded State & Pulse Cyan
+    Island->>Island: Morph to 'voice-listening' (Cyan Ring)
     Wake->>Sonia: Play yes_boss_1.wav ("Yes, Boss?")
     Sonia-->>User: Oral Audio: "Yes, Boss?" (0ms Network Latency)
-    Note over Wake: Mute Mic for 1.3s to prevent feedback loop
+    Note over Wake: Mute Mic for playback buffer to prevent acoustic feedback
     Wake->>Island: WS: WAKE_WORD_LISTENING ("Listening to you, Boss...")
+    Wake->>Wake: Open 6.5s Active Follow-Up Capture Window
     User->>Mic: "What is my phone battery?"
-    Mic->>Wake: Command Audio Stream (Pause threshold: 0.8s)
-    Wake->>Whisper: Stream WAV to Whisper-large-v3-turbo
-    Whisper-->>Wake: "What is my phone battery?" (~150ms)
+    Mic->>Wake: Command Audio Stream
+    Wake->>Whisper: Stream WAV to Whisper-large-v3-turbo (~150ms)
+    Whisper-->>Wake: "What is my phone battery?"
     Wake->>Kernel: Dispatch Directive
-    Kernel-->>Island: WS: "Your phone battery is currently at 96%."
-    Kernel-->>User: Sonia HD Oral Voice: "Your phone battery is at 96%."
+    Kernel-->>Island: WS: "Your phone battery is currently at 88%."
+    Kernel-->>User: Sonia HD Oral Voice: "Your phone battery is at 88%."
 ```
 
-- **Natural Wake Variations**: Phonetically matches `Hey Ada`, `Ada`, `Hi Ada`, `Hello Ada`, and `Okay Ada`.
+- **Natural Wake Variations**: Phonetically matches `Hey Ada`, `Ada`, `Hi Ada`, `Hello Ada`, `Okay Ada`, `Ay Ada`, and `A.D.A.`
 - **Pre-Rendered Studio Voice Chimes**: Uses pre-synthesized neural clips ([`yes_boss_1.wav`](backend/voice/wake_responses/yes_boss_1.wav) through [`yes_boss_5.wav`](backend/voice/wake_responses/yes_boss_5.wav)) with `en-GB-SoniaNeural` for zero-delay verbal acknowledgement.
 - **Acoustic Self-Muting**: Automatically silences microphone input during speech synthesis to prevent self-triggering feedback loops.
 - **Dual Invocation Modes**:
   1. *Two-Step Conversational*: Say *"Hey ADA"* ➔ She replies *"Yes, Boss?"* ➔ Speak your command.
-  2. *Single-Breath Directive*: Say *"Hey ADA, check my battery"* ➔ She parses your command directly and executes immediately.
+  2. *Single-Breath Directive*: Say *"Hey ADA, check my battery"* ➔ She acknowledges and executes immediately without waiting for a second sentence.
 
 ---
 
-### 3. 100% Genuine Real-Time Telemetry
+### 3. Acoustic Safety & Anti-Hallucination Shield
+
+To guarantee that ADA **never executes autonomous or spontaneous actions on ambient silence**, three layers of acoustic protection are active 24/7:
+
+1. **Pure-Python RMS Acoustic Energy Gating**:
+   Before transmitting any audio to cloud APIs, the listener computes the Root-Mean-Square (RMS) amplitude directly on the raw 16-bit PCM bytes:
+   $$\text{RMS} = \sqrt{\frac{1}{N}\sum_{i=1}^N x_i^2}$$
+   If $\text{RMS} < 100$, the buffer (silence, room fan hum, typing, far-field murmur) is discarded in $<2\text{ms}$ with zero network calls.
+
+2. **Zero-Verb Whisper Prompt Priming**:
+   Whisper uses its `prompt` parameter as preceding conversational context. When quiet audio is transcribed, Whisper hallucinates whatever words appear in `prompt`. ADA enforces strict zero-verb priming:
+   ```python
+   prompt = "Hey Ada. ADA is an AI assistant."  # Primes assistant name; NO verbs or app names
+   ```
+   Whisper can never hallucinate application names (Spotify, WhatsApp, Chrome) on faint noise.
+
+3. **Silence Hallucination Blacklist**:
+   Recognized tokens matching known Whisper silence artifacts (`"Thank you"`, `"Thanks for watching"`, `"Subtitles by"`, `"Please subscribe"`, `"Bye"`) are dropped before triggering the cognitive router.
+
+4. **Messaging Safety Interlocks**:
+   In [`backend/devices/core.py`](backend/devices/core.py), sending WhatsApp, Instagram, or Telegram messages strictly verifies the contact recipient. If `contact` is empty or unspecified, the action is rejected immediately (`"Cannot send message: No recipient contact specified."`), preventing accidental messages to visible chat lists.
+
+---
+
+### 4. 100% Genuine Real-Time Telemetry
 
 ADA rejects mocked and randomized data. Every metric shown across the HUD and Dynamic Island is collected live from the host operating system and connected hardware:
 
@@ -178,13 +209,13 @@ ADA rejects mocked and randomized data. Every metric shown across the HUD and Dy
 | :--- | :--- | :--- |
 | **Synapse Processor** | `psutil.cpu_percent(percpu=True)` | **16 Logical Threads (10 Physical Cores)**, real-time load bars per thread, **2.40 GHz** clock. |
 | **System Memory (RAM)** | `psutil.virtual_memory()` | Physical host RAM (**12.2 / 15.7 GB**, live utilization gauge & nominal health status). |
-| **Phone Bridge (ADB)** | `adb shell dumpsys battery` | Live Wi-Fi ADB connection (`192.168.0.101:5555`), real battery level (**96% LINKED**), charging state. |
+| **Phone Bridge (ADB)** | `adb shell dumpsys battery` | Live Wi-Fi ADB connection (`192.168.0.101:5555`), real battery level (**88% LINKED**), charging state. |
 | **Subsystem Matrix** | Internal Kernel Event Bus | Real-time status for Cognitive Core (`ONLINE`), Desktop Controller (`ARMED`), Voice Wake (`ARMED`), and TTS Engine (`SONIA HD`). |
 | **Directive Stream** | `useNovaStore.messages` | Live log stream displaying actual user directives, kernel executions, and assistant responses (zero fake tickers). |
 
 ---
 
-### 4. 3D Holographic Neural Interface
+### 5. 3D Holographic Neural Interface
 
 Rendered using **Three.js** and **React Three Fiber (@react-three/fiber)**:
 - **Holographic Synaptic Sphere**: 150+ dynamic neural vertices connected with pulsing cyan synaptic arcs that morph in real-time based on audio amplitude and processing state.
@@ -194,7 +225,7 @@ Rendered using **Three.js** and **React Three Fiber (@react-three/fiber)**:
 
 ---
 
-### 5. Cross-Platform Automation Matrix
+### 6. Cross-Platform Automation Matrix
 
 ```
                         ┌───────────────────────────────┐
@@ -223,6 +254,7 @@ Rendered using **Three.js** and **React Three Fiber (@react-three/fiber)**:
 - **Android ADB Wireless Bridge**:
   - Automated zeroconf / mDNS detection of connected Android devices on local subnet.
   - Automated screen wake, PIN unlock swipe, app launcher (`monkey -p com.whatsapp`), contact search, and message dispatch.
+  - State-aware self-healing UI Automator navigation (`uiautomator dump`) that checks active screens, clears search overlays, and dismisses soft keyboards automatically.
 
 ---
 
@@ -252,7 +284,7 @@ The backend daemon listens on `http://127.0.0.1:8000` (and `0.0.0.0:8000` for LA
 | `GET` | `/api/telemetry` | Real hardware telemetry: 16 CPU threads, RAM GB/%, ADB battery, active AI model. |
 | `GET/POST`| `/api/tts` | Studio neural voice synthesis (`en-GB-SoniaNeural`) with MP3 stream output. |
 | `POST` | `/api/voice/transcribe` | Ultra-fast audio transcription via Groq Whisper-large-v3-turbo (~150ms). |
-| `GET` | `/api/voice/wake/status` | Returns active status of the "Hey ADA" background wake word listener. |
+| `GET` | `/api/voice/wake/status` | Returns active status of the "Hey ADA" background wake word listener (`running`, `speaking`, `energy_threshold`). |
 | `POST` | `/api/voice/wake/toggle` | Programmatically start or stop the background wake word listener. |
 | `GET` | `/api/briefing` | Generates oral and written executive briefing with weather and schedule. |
 | `GET` | `/api/devices` | Lists connected wireless ADB Android devices and battery levels. |
@@ -336,54 +368,15 @@ launch_ada.bat
 
 ---
 
-## Project Structure
+## Troubleshooting & Diagnostics
 
-```
-NOVA_AI/
-├── backend/                        # Python 3.11 Cognitive Kernel
-│   ├── browser/                    # Playwright Web Automation
-│   ├── core/                       # Dependency Injection, Logger, Configuration
-│   ├── desktop/                    # Native Windows App Automation Controllers
-│   │   └── controllers/            # Notepad, Calculator, Explorer Controllers
-│   ├── devices/                    # Wireless Android ADB Bridge & Discovery
-│   ├── kernel/                     # Nova Autonomous Kernel & Capability Router
-│   ├── memory/                     # ChromaDB Vector Store & SQLite Engine
-│   ├── missions/                   # Autonomous Task & Overnight Mission Runner
-│   ├── planner/                    # Hierarchical Task Decomposition Engine
-│   ├── proactive/                  # Dynamic Briefing Engine
-│   ├── providers/                  # Groq, Gemini & OpenRouter Adapters
-│   ├── search/                     # Deep Web Research Engine
-│   ├── voice/                      # Audio I/O, Studio TTS, Wake Word Engine
-│   │   ├── wake_responses/         # Pre-rendered Sonia HD Verbal Audio Clips
-│   │   └── wake_word.py            # Autonomous "Hey ADA" Background Listener
-│   └── main.py                     # FastAPI Application, WebSockets & REST Routes
-│
-├── frontend/                       # React 19 + Electron Holographic Client
-│   ├── electron/                   # Electron Main & Preload Scripts
-│   │   ├── main.cjs                # Window Manager (Dashboard & Dynamic Island)
-│   │   └── preload.cjs             # IPC Security Bridge
-│   ├── public/                     # Static Assets & Cybernetic Audio Chimes
-│   │   └── sounds/                 # wake.wav, startup.wav, wake_responses/
-│   ├── src/
-│   │   ├── components/
-│   │   │   ├── Brain/              # 3D Holographic Neural Scene & SystemHUD
-│   │   │   ├── DynamicIsland.tsx   # Screen-Top Floating Liquid Capsule
-│   │   │   ├── HUD/                # Startup, Workspace & Customizer Modals
-│   │   │   └── Voice/              # Voice Controller & Directives Bar
-│   │   ├── contexts/               # Dual WebSocket Connection Providers
-│   │   ├── hooks/                  # Voice Recognition & Gesture Hooks
-│   │   └── store/                  # Zustand Global Store (useNovaStore)
-│   └── vite.config.ts              # Vite Bundler Configuration
-│
-├── docs/                           # Master Documentation Hub (Chapters 01 - 35)
-│   ├── manual/                     # 35-Chapter Comprehensive Operating Manual
-│   ├── architecture/               # Subsystem Architecture Specifications
-│   └── release/                    # Deployment & Production Checklists
-│
-├── launch_ada.bat                  # One-Click Unified Launcher (Backend + Electron)
-├── launch_ada_silent.vbs           # Background Launcher (No Console Window)
-└── README.md                       # Master Architecture & Operating Documentation
-```
+| Symptom | Probable Cause | Diagnostic Command / Resolution |
+| :--- | :--- | :--- |
+| **ADA does not wake on "Hey ADA"** | Microphone muted or ambient noise calibrated too high | Check `GET /api/voice/wake/status`. Verify microphone input level in Windows Settings. Speak closer to the microphone. |
+| **Spontaneous task execution** | Whisper prompt hallucination (historical bug) | Ensure you are on latest commit [`6219f4d`](https://github.com/Codewithjainam7/Nova/commit/6219f4d) with zero-verb prompt priming and RMS gating active. |
+| **Dynamic Island is blank** | React hook ordering or Electron preload error | Re-run `npm run build` in `frontend/`. Check DevTools (<kbd>Ctrl+Shift+I</kbd>). |
+| **Phone Bridge shows "UNLINKED"** | Android Wi-Fi ADB port closed or IP changed | Run `adb devices` in terminal. Re-connect phone with `adb connect <IP>:5555`. |
+| **Backend port 8000 in use** | Orphaned uvicorn background process | Run `netstat -ano \| findstr :8000` and terminate with `taskkill /F /PID <PID>`. |
 
 ---
 
@@ -397,10 +390,12 @@ For in-depth architectural deep-dives, developer manuals, and API specifications
 - **[Chapter 06: Desktop Automation Engine](docs/manual/06_DESKTOP_AUTOMATION_ENGINE.md)**
 - **[Chapter 10: Speech Recognition (STT) Subsystem](docs/manual/10_SPEECH_RECOGNITION_STT.md)**
 - **[Chapter 11: Text-to-Speech (TTS) Subsystem](docs/manual/11_TEXT_TO_SPEECH_TTS.md)**
-- **[Chapter 17: Wireless Android ADB Integration](docs/manual/17_ANDROID_ADB_INTEGRATION.md)**
+- **[Chapter 12: Full-Duplex Voice Pipeline Orchestration](docs/manual/12_VOICE_PIPELINE_ORCHESTRATION.md)**
+- **[Chapter 17: Wireless Android ADB Subsystem](docs/manual/17_ANDROID_ADB_INTEGRATION.md)**
 - **[Chapter 20: 3D Neural Brain Canvas (Three.js)](docs/manual/20_3D_NEURAL_BRAIN_CANVAS.md)**
 - **[Chapter 21: Holographic HUD & Dynamic Island](docs/manual/21_HOLOGRAPHIC_HUD_AND_UI_COMPONENTS.md)**
 - **[Chapter 24: REST & WebSocket API Reference](docs/manual/24_REST_API_REFERENCE.md)**
+- **[Chapter 26: Troubleshooting & Diagnostic Matrix](docs/manual/26_TROUBLESHOOTING_AND_FAQ.md)**
 - **[Chapter 35: Master Navigation Hub](docs/manual/README.md)**
 
 ---

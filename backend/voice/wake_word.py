@@ -22,7 +22,7 @@ from backend.core.logger import app_logger
 
 # Phonetic & natural regex variations of "Hey ADA"
 WAKE_REGEX = re.compile(
-    r'\b(?:hey|hi|hello|ok|okay)?\s*(?:ada|ayda|aida|eda|ida)\b[\s,.:;!?]*',
+    r'\b(?:hey|hi|hello|ok|okay|ay)?\s*(?:ada|ayda|aida|eda|ida|adda|ahda|aada|a\.d\.a\.)\b[\s,.:;!?]*',
     re.IGNORECASE
 )
 
@@ -30,7 +30,7 @@ WAKE_REGEX = re.compile(
 HALLUCINATION_BLACK_LIST = {
     "thank you", "thank you.", "thank you very much.", "thanks for watching",
     "thanks for watching!", "subtitles by", "subtitle by", "please subscribe",
-    "please subscribe.", "bye.", "you", "mbc", "amara.org", "..."
+    "please subscribe.", "bye.", "you", "mbc", "amara.org", "...", "here you go", "here you go."
 }
 
 # Pre-rendered natural studio responses in Sonia HD persona
@@ -109,7 +109,8 @@ class WakeWordService:
         """Transcribes audio using Groq Whisper (~150ms) or Google Speech fallback."""
         raw_pcm = audio_data.get_raw_data()
         rms = calculate_rms(raw_pcm)
-        if rms < 300:
+        app_logger.debug(f"[WakeWord] Captured audio chunk RMS: {rms:.1f}")
+        if rms < 100:
             # Silence, ambient room noise, typing or fan acoustics - ignore
             return ""
 
@@ -125,7 +126,7 @@ class WakeWordService:
                     model="whisper-large-v3-turbo",
                     response_format="json",
                     language="en",
-                    prompt=None  # NO prompt biasing: prevents hallucinating app names
+                    prompt="Hey Ada. ADA is an AI assistant."
                 )
                 text = (res.text or "").strip()
                 # Filter out known Whisper silence hallucinations
@@ -152,8 +153,8 @@ class WakeWordService:
             with self.microphone as source:
                 app_logger.info("[WakeWord] Calibrating microphone for ambient room acoustics...")
                 self.recognizer.adjust_for_ambient_noise(source, duration=0.8)
-                if self.recognizer.energy_threshold < 400:
-                    self.recognizer.energy_threshold = 400
+                if self.recognizer.energy_threshold < 200:
+                    self.recognizer.energy_threshold = 200
                 app_logger.info(f"[WakeWord] Calibrated. Baseline energy threshold: {self.recognizer.energy_threshold:.1f}")
         except Exception as e:
             app_logger.error(f"[WakeWord] Failed to initialize microphone: {e}")
@@ -195,27 +196,28 @@ class WakeWordService:
             if match:
                 wake_phrase = match.group(0).strip()
                 directive = transcript[match.end():].strip().lstrip(",.-: ")
-                app_logger.info(f"[WakeWord] *** WAKE WORD DETECTED: '{wake_phrase}' | Direct: '{directive}' ***")
+                app_logger.info(f"[WakeWord] *** WAKE WORD DETECTED: '{wake_phrase}' | Tail Directive: '{directive}' ***")
                 
-                # Strict Two-Step Verbal Wake: Always verbally acknowledge ("Yes, Boss?")
-                # and listen for user directive, eliminating any chance of phantom execution!
-                self._respond_and_listen_for_directive(wake_phrase)
+                # Filter directive: If it's in hallucination black list or empty, ignore tail
+                if directive.lower().rstrip(".!?,") in HALLUCINATION_BLACK_LIST:
+                    directive = ""
+
+                self._respond_and_listen_for_directive(wake_phrase, direct_command=directive)
 
         app_logger.info("[WakeWord] Background microphone listener thread stopped.")
 
-    def _respond_and_listen_for_directive(self, wake_phrase: str):
-        """Verbally says 'Yes, Boss?' in Sonia HD, expands UI, then listens for command."""
+    def _respond_and_listen_for_directive(self, wake_phrase: str, direct_command: str = ""):
+        """Verbally acknowledges in Sonia HD, expands UI, then executes or listens for command."""
         self.set_speaking(True)
         
         # Pick response text
-        oral_text = "Yes, Boss?"
         choice_file, oral_text = random.choice(WAKE_RESPONSES)
         wav_path = os.path.join(self.wake_sound_dir, choice_file)
         
         # 1. Notify frontend UI to expand into active listening mode
         if self.on_wake_detected:
             try:
-                self.on_wake_detected(wake_phrase, "", oral_text)
+                self.on_wake_detected(wake_phrase, direct_command, oral_text)
             except Exception as ex:
                 app_logger.error(f"[WakeWord] Callback error: {ex}")
 
@@ -230,7 +232,14 @@ class WakeWordService:
         time.sleep(0.18)
         self.set_speaking(False)
 
-        # 3. Update UI to indicate she is now listening to your words
+        # If user spoke the directive directly in one breath (e.g. "Hey Ada what is my phone battery")
+        if direct_command and len(direct_command.split()) >= 2:
+            app_logger.info(f"[WakeWord] Direct command dispatched immediately: '{direct_command}'")
+            if self.on_directive_ready:
+                self.on_directive_ready(direct_command)
+            return
+
+        # Otherwise, user just said "Hey Ada" -> update UI to "Listening to you, Boss..." and listen!
         if self.on_listening_state:
             try:
                 self.on_listening_state("Listening to you, Boss...")
