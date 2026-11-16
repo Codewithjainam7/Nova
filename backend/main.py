@@ -505,8 +505,7 @@ async def voice_transcribe(request: Request):
                 file=("audio.webm", audio_bytes),
                 model="whisper-large-v3-turbo",
                 response_format="json",
-                language="en",
-                prompt="Ada, WhatsApp, Telegram, Spotify, Settings, Chrome, Windows"
+                language="en"
             )
             text = transcription.text.strip()
             app_logger.info(f"Groq Whisper transcription result: {text}")

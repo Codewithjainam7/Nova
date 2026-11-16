@@ -334,6 +334,11 @@ class DeviceManager:
         with the specified contact. Recovers gracefully if interrupted or minimized.
         """
         import time
+        contact_clean = (contact or "").strip()
+        if not contact_clean:
+            app_logger.warning("[WhatsApp] Refusing navigation: Contact name is empty.")
+            return False
+
         package = "com.whatsapp"
         
         for attempt in range(max_attempts):
@@ -403,14 +408,15 @@ class DeviceManager:
             found_contact_node = None
             for node in ui_state.iter("node"):
                 if node.get("resource-id") == "com.whatsapp:id/conversations_row_contact_name":
-                    if contact.lower() in node.get("text", "").lower():
+                    node_text = (node.get("text") or "").strip().lower()
+                    if contact_clean.lower() in node_text:
                         found_contact_node = node
                         break
             
             if found_contact_node is not None:
                 coords = self.get_node_center(found_contact_node)
                 if coords:
-                    app_logger.info(f"Contact '{contact}' found directly on chat list at {coords}. Tapping...")
+                    app_logger.info(f"Contact '{contact_clean}' found directly on chat list at {coords}. Tapping...")
                     subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
                     time.sleep(1.5)
                     ui_verify = self.dump_ui(target)
@@ -443,6 +449,11 @@ class DeviceManager:
         the contact chat, and enters the chat thread without any risk of opening Notifications.
         """
         import time
+        contact_clean = (contact or "").strip()
+        if not contact_clean:
+            app_logger.warning("[Instagram] Refusing navigation: Contact name is empty.")
+            return False
+
         package = "com.instagram.android"
         
         for attempt in range(max_attempts):
@@ -709,8 +720,12 @@ class DeviceManager:
 
         if intent == "send_message":
             try:
+                contact = (entity or "").strip()
+                if not contact:
+                    app_logger.warning(f"[{target}] send_message rejected: No recipient contact specified.")
+                    return "Cannot send message: No recipient contact was specified."
+
                 self.unlock_device(target)
-                contact = entity
                 message = kwargs.get("message", "")
                 raw_app = kwargs.get("app", "whatsapp")
                 app = raw_app.lower() if raw_app else "whatsapp"

@@ -10,6 +10,8 @@ import os
 import re
 import time
 import io
+import math
+import struct
 import wave
 import random
 import threading
@@ -24,6 +26,13 @@ WAKE_REGEX = re.compile(
     re.IGNORECASE
 )
 
+# Known Whisper phantom hallucinations on silence / low-volume noise
+HALLUCINATION_BLACK_LIST = {
+    "thank you", "thank you.", "thank you very much.", "thanks for watching",
+    "thanks for watching!", "subtitles by", "subtitle by", "please subscribe",
+    "please subscribe.", "bye.", "you", "mbc", "amara.org", "..."
+}
+
 # Pre-rendered natural studio responses in Sonia HD persona
 WAKE_RESPONSES = [
     ("yes_boss_1.wav", "Yes, Boss?"),
@@ -34,6 +43,17 @@ WAKE_RESPONSES = [
     ("yes_boss_4.wav", "I'm here, Boss."),
     ("yes_boss_5.wav", "Listening, Boss.")
 ]
+
+def calculate_rms(raw_pcm: bytes) -> float:
+    """Calculates root-mean-square audio energy of 16-bit PCM buffer in <2ms."""
+    if not raw_pcm:
+        return 0.0
+    count = len(raw_pcm) // 2
+    if count == 0:
+        return 0.0
+    shorts = struct.unpack(f"<{count}h", raw_pcm[:count * 2])
+    sum_sq = sum(s * s for s in shorts)
+    return math.sqrt(sum_sq / count)
 
 class WakeWordService:
     def __init__(
@@ -87,6 +107,12 @@ class WakeWordService:
 
     def _transcribe_audio(self, audio_data: sr.AudioData) -> str:
         """Transcribes audio using Groq Whisper (~150ms) or Google Speech fallback."""
+        raw_pcm = audio_data.get_raw_data()
+        rms = calculate_rms(raw_pcm)
+        if rms < 300:
+            # Silence, ambient room noise, typing or fan acoustics - ignore
+            return ""
+
         wav_bytes = audio_data.get_wav_data(convert_rate=16000, convert_width=2)
         
         # 1. Groq Whisper Turbo (~150ms, world-class precision)
@@ -99,9 +125,12 @@ class WakeWordService:
                     model="whisper-large-v3-turbo",
                     response_format="json",
                     language="en",
-                    prompt="Hey Ada, Ada, Spotify, WhatsApp, Chrome, Windows, battery"
+                    prompt=None  # NO prompt biasing: prevents hallucinating app names
                 )
                 text = (res.text or "").strip()
+                # Filter out known Whisper silence hallucinations
+                if text.lower().rstrip(".!?,") in HALLUCINATION_BLACK_LIST or len(text) < 3:
+                    return ""
                 if text:
                     return text
             except Exception as e:
@@ -123,8 +152,8 @@ class WakeWordService:
             with self.microphone as source:
                 app_logger.info("[WakeWord] Calibrating microphone for ambient room acoustics...")
                 self.recognizer.adjust_for_ambient_noise(source, duration=0.8)
-                if self.recognizer.energy_threshold < 150:
-                    self.recognizer.energy_threshold = 150
+                if self.recognizer.energy_threshold < 400:
+                    self.recognizer.energy_threshold = 400
                 app_logger.info(f"[WakeWord] Calibrated. Baseline energy threshold: {self.recognizer.energy_threshold:.1f}")
         except Exception as e:
             app_logger.error(f"[WakeWord] Failed to initialize microphone: {e}")
@@ -165,23 +194,12 @@ class WakeWordService:
             match = WAKE_REGEX.search(transcript)
             if match:
                 wake_phrase = match.group(0).strip()
-                directive = transcript[match.end():].strip()
-                app_logger.info(f"[WakeWord] *** WAKE WORD DETECTED: '{wake_phrase}' | Directive: '{directive}' ***")
+                directive = transcript[match.end():].strip().lstrip(",.-: ")
+                app_logger.info(f"[WakeWord] *** WAKE WORD DETECTED: '{wake_phrase}' | Direct: '{directive}' ***")
                 
-                if directive and self.on_directive_ready:
-                    # User spoke the directive in one breath (e.g. "Hey Ada what's my phone battery")
-                    if self.on_wake_detected:
-                        try:
-                            self.on_wake_detected(wake_phrase, directive, "Processing...")
-                        except Exception as ex:
-                            app_logger.error(f"[WakeWord] Error in on_wake_detected callback: {ex}")
-                    try:
-                        self.on_directive_ready(directive)
-                    except Exception as ex:
-                        app_logger.error(f"[WakeWord] Error in on_directive_ready callback: {ex}")
-                else:
-                    # User said just "Hey Ada", verbally respond with "Yes, Boss?" and then listen!
-                    self._respond_and_listen_for_directive(wake_phrase)
+                # Strict Two-Step Verbal Wake: Always verbally acknowledge ("Yes, Boss?")
+                # and listen for user directive, eliminating any chance of phantom execution!
+                self._respond_and_listen_for_directive(wake_phrase)
 
         app_logger.info("[WakeWord] Background microphone listener thread stopped.")
 
@@ -241,9 +259,13 @@ class WakeWordService:
             if followup_text:
                 # Clean any accidental repetition of wake phrase
                 clean_directive = WAKE_REGEX.sub('', followup_text).strip() or followup_text.strip()
-                app_logger.info(f"[WakeWord] Follow-up directive heard: '{clean_directive}'")
-                if self.on_directive_ready:
-                    self.on_directive_ready(clean_directive)
+                clean_directive = clean_directive.strip(",.-: ")
+                if clean_directive and len(clean_directive) > 2 and clean_directive.lower() not in HALLUCINATION_BLACK_LIST:
+                    app_logger.info(f"[WakeWord] Follow-up directive heard: '{clean_directive}'")
+                    if self.on_directive_ready:
+                        self.on_directive_ready(clean_directive)
+                else:
+                    app_logger.info(f"[WakeWord] Follow-up disregarded as non-directive: '{clean_directive}'")
         except sr.WaitTimeoutError:
             app_logger.info("[WakeWord] Follow-up timed out without speech.")
             if self.on_listening_state:
