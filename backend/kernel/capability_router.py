@@ -222,6 +222,21 @@ class CapabilityRouter:
             return True
 
         try:
+            # 0. Native Windows System Actions (Instantaneous Win32 Lock & Sleep)
+            if intent in ["lock_laptop", "lock_screen", "lock_pc"] or desktop_action_str == "LOCK_SCREEN" or (intent == "lock" and app_name in ["", "windows", "laptop", "pc"]):
+                import ctypes
+                app_logger.info("[CapabilityRouter] Executing native Win32 LockWorkStation...")
+                ctypes.windll.user32.LockWorkStation()
+                task.action_metadata["execution_output"] = "I have locked your laptop, Boss."
+                return True
+
+            if intent in ["sleep", "sleep_laptop", "sleep_pc"] or desktop_action_str == "SLEEP":
+                import ctypes
+                app_logger.info("[CapabilityRouter] Executing native Win32 SetSuspendState...")
+                ctypes.windll.powrprof.SetSuspendState(0, 1, 0)
+                task.action_metadata["execution_output"] = "Putting laptop to sleep, Boss."
+                return True
+
             # 1. Semantic Intent Routing (Spotify, Settings, Calculator, Notepad, File Explorer, Folder Organization)
             file_organize_intents = {"organize", "organize_folder", "sort_folder", "clean_folder"}
             if intent in file_organize_intents:

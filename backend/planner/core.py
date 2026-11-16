@@ -322,6 +322,112 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
         """Heuristic rule-based planner for instant local automation."""
         q = query.lower().strip()
 
+        # 0.01. Instant Lock Laptop / PC Fast-Path (<5ms)
+        if any(k in q for k in ["lock laptop", "lock my laptop", "lock the laptop", "lock pc", "lock my pc", "lock computer", "lock screen", "lock windows", "lock workstation"]) or q in ["lock", "lock system", "lock device"]:
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description="Lock laptop workstation immediately",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "windows",
+                    "intent": "lock_laptop",
+                    "entity": "",
+                    "desktop_action": "LOCK_SCREEN"
+                }
+            )
+            return Plan(
+                plan_id=str(uuid.uuid4()),
+                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query),
+                goal=Goal(primary_goal="Lock laptop screen"),
+                tasks=[task]
+            )
+
+        # 0.02. Instant Lock Phone / Mobile Screen Fast-Path (<40ms)
+        is_lock_phone = (
+            any(k in q for k in ["lock phone", "lock my phone", "lock the phone", "lock mobile", "lock my mobile", "lock android", "turn off phone screen", "turn off mobile screen"])
+            and not any(u in q for u in ["unlock", "wake"])
+        )
+        if is_lock_phone:
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description="Lock Android phone screen",
+                required_tools=["device"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "phone",
+                    "intent": "lock_phone",
+                    "entity": ""
+                }
+            )
+            return Plan(
+                plan_id=str(uuid.uuid4()),
+                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query),
+                goal=Goal(primary_goal="Lock phone screen"),
+                tasks=[task]
+            )
+
+        # 0.03. Instant Unlock / Wake Phone Fast-Path (<60ms)
+        if any(k in q for k in ["unlock phone", "unlock my phone", "unlock the phone", "unlock mobile", "unlock my mobile", "wake phone", "wake up phone"]):
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description="Wake and unlock Android phone",
+                required_tools=["device"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "phone",
+                    "intent": "unlock_phone",
+                    "entity": ""
+                }
+            )
+            return Plan(
+                plan_id=str(uuid.uuid4()),
+                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query),
+                goal=Goal(primary_goal="Unlock phone"),
+                tasks=[task]
+            )
+
+        # 0.04. Instant Phone Battery Perception Fast-Path (<40ms)
+        if any(k in q for k in ["phone battery", "battery of phone", "check phone battery", "what is my phone battery", "what's my phone battery", "battery status"]) or (q in ["battery", "check battery", "my battery"] and "laptop" not in q):
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description="Retrieve real-time phone battery level",
+                required_tools=["device"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "phone",
+                    "intent": "get_battery",
+                    "entity": ""
+                }
+            )
+            return Plan(
+                plan_id=str(uuid.uuid4()),
+                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query),
+                goal=Goal(primary_goal="Check phone battery"),
+                tasks=[task]
+            )
+
+        # 0.05. Instant Sleep Laptop Fast-Path (<10ms)
+        if any(k in q for k in ["sleep laptop", "sleep pc", "put laptop to sleep", "sleep my laptop", "suspend laptop"]):
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description="Put laptop to sleep",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "windows",
+                    "intent": "sleep",
+                    "entity": "",
+                    "desktop_action": "SLEEP"
+                }
+            )
+            return Plan(
+                plan_id=str(uuid.uuid4()),
+                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query),
+                goal=Goal(primary_goal="Put laptop to sleep"),
+                tasks=[task]
+            )
+
         # 0. Conversational Memory & Profile Queries: Return empty tasks so pipeline synthesizes from injected profile
         memory_queries = ["who is ", "what do you remember", "what do you know about me", "show my memory", "show memory", "my contacts", "who are my contacts", "what are my rules"]
         if any(mq in q for mq in memory_queries):

@@ -911,11 +911,18 @@ class DeviceManager:
                 app_logger.error(f"Failed to transfer file: {e}")
                 return f"Failed to transfer file: {e}"
                 
-        if intent == "lock_phone":
+        if intent in ["lock_phone", "lock", "lock_mobile", "screen_off"]:
             try:
                 subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "26"])
                 return "I have locked your phone screen."
             except Exception as e:
                 return f"Failed to lock phone: {e}"
+
+        if intent in ["unlock_phone", "unlock", "wake_phone", "screen_on"]:
+            try:
+                self.unlock_device(target)
+                return "I have unlocked your phone."
+            except Exception as e:
+                return f"Failed to unlock phone: {e}"
         
         return f"Unknown intent: {intent}"
