@@ -23,7 +23,7 @@ class CallScreeningDaemon:
             self.adb_path = adb_path
 
         self.enabled: bool = True
-        self.unattended_seconds: float = 12.0  # Auto-answer threshold (~4 rings)
+        self.unattended_seconds: float = 8.0  # Auto-answer threshold (~2-3 rings)
         self.is_monitoring: bool = False
         self._monitor_task: Optional[asyncio.Task] = None
         
@@ -103,37 +103,52 @@ class CallScreeningDaemon:
         return phone_number
 
     def read_telephony_state(self, target: str) -> Dict[str, Any]:
-        """Polls dumpsys telephony.registry for accurate real-time call states."""
+        """Polls dumpsys telephony.registry for accurate real-time call states across all SIM slots."""
         try:
             res = subprocess.run(
                 [self.adb_path, "-s", target, "shell", "dumpsys", "telephony.registry"],
                 capture_output=True, text=True, timeout=3, errors="ignore"
             )
-            call_state = 0
-            incoming_number = ""
+            states = []
+            incoming_numbers = []
             for line in res.stdout.splitlines():
                 if "mCallState=" in line:
                     m = re.search(r'mCallState=(\d+)', line)
                     if m:
-                        call_state = int(m.group(1))
+                        states.append(int(m.group(1)))
                 if "mCallIncomingNumber=" in line:
                     m_num = re.search(r'mCallIncomingNumber=([^\s,]+)', line)
-                    if m_num and m_num.group(1):
-                        incoming_number = m_num.group(1).strip()
-            return {"call_state": call_state, "incoming_number": incoming_number}
+                    if m_num and m_num.group(1) and m_num.group(1).strip():
+                        incoming_numbers.append(m_num.group(1).strip())
+
+            # State priority across Dual SIM: 1 (RINGING) > 2 (OFFHOOK) > 0 (IDLE)
+            active_state = 0
+            if 1 in states:
+                active_state = 1
+            elif 2 in states:
+                active_state = 2
+            elif states:
+                active_state = states[0]
+
+            active_num = incoming_numbers[0] if incoming_numbers else ""
+            return {"call_state": active_state, "incoming_number": active_num}
         except Exception as e:
             app_logger.debug(f"[CallScreening] Poll error: {e}")
             return {"call_state": 0, "incoming_number": ""}
 
     def answer_call(self, target: str):
-        """Answers incoming call and toggles speakerphone."""
+        """Answers incoming call reliably on POCO X6 Neo 5G (HyperOS) and enables speakerphone."""
         app_logger.info(f"[CallScreening] Answering incoming call on {target}...")
         try:
-            # Keyevent 5 = KEYCODE_CALL (Answer call)
-            subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "5"], timeout=3)
-            time.sleep(1.0)
-            # Wake speakerphone
-            subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "226"], timeout=3)
+            # 1. Wake screen up
+            subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "224"], timeout=2)
+            time.sleep(0.3)
+            # 2. Keyevent 79 (KEYCODE_HEADSETHOOK) & Keyevent 5 (KEYCODE_CALL) for HyperOS pickup
+            subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "79"], timeout=2)
+            subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "5"], timeout=2)
+            time.sleep(1.2)
+            # 3. Toggle speakerphone (Keyevent 226)
+            subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "226"], timeout=2)
             return True
         except Exception as e:
             app_logger.error(f"[CallScreening] Failed to answer call: {e}")
