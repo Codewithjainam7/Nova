@@ -2,6 +2,8 @@ import time
 import os
 import shutil
 import ctypes
+import re
+import datetime
 from typing import Optional, Dict, Any, List
 from backend.desktop.controllers.base_controller import AppController
 from backend.core.logger import app_logger
@@ -27,6 +29,7 @@ class FileExplorerController(AppController):
         "documents": os.path.expanduser(r"~\Documents"),
         "desktop": os.path.expanduser(r"~\Desktop"),
         "pictures": os.path.expanduser(r"~\Pictures"),
+        "screenshots": os.path.join(os.path.expanduser("~"), "OneDrive", "Pictures", "Screenshots") if os.path.exists(os.path.join(os.path.expanduser("~"), "OneDrive", "Pictures", "Screenshots")) else os.path.join(os.path.expanduser("~"), "Pictures", "Screenshots"),
         "videos": os.path.expanduser(r"~\Videos"),
         "music": os.path.expanduser(r"~\Music"),
         "c": r"C:\\",
@@ -131,6 +134,12 @@ class FileExplorerController(AppController):
 
         user_home = os.path.expanduser("~")
         candidates = {
+            "screenshot": [
+                os.path.join(user_home, "OneDrive", "Pictures", "Screenshots"),
+                os.path.join(user_home, "Pictures", "Screenshots"),
+                os.path.join(user_home, "OneDrive", "Screenshots"),
+                os.path.join(user_home, "Screenshots")
+            ],
             "desktop": [os.path.join(user_home, "OneDrive", "Desktop"), os.path.join(user_home, "Desktop")],
             "documents": [os.path.join(user_home, "OneDrive", "Documents"), os.path.join(user_home, "Documents")],
             "downloads": [os.path.join(user_home, "Downloads"), os.path.join(user_home, "OneDrive", "Downloads")],
@@ -188,6 +197,11 @@ class FileExplorerController(AppController):
             app_logger.error(self.last_result)
             return False
 
+        is_screenshot_folder = (
+            "screenshot" in folder_path.lower() or 
+            (folder_target is not None and "screenshot" in folder_target.lower())
+        )
+
         for item in entries:
             src = os.path.join(folder_path, item)
             
@@ -205,7 +219,24 @@ class FileExplorerController(AppController):
             if ext_lower in ignore_exts:
                 continue
 
-            category = ext_to_cat.get(ext_lower, "Other")
+            if is_screenshot_folder:
+                # Group screenshots by Month Year (e.g. "October 2026", "November 2026")
+                category = "Other Screenshots"
+                m = re.search(r'(\d{4})[-_](\d{2})', item)
+                if m:
+                    try:
+                        category = datetime.date(int(m.group(1)), int(m.group(2)), 1).strftime("%B %Y")
+                    except Exception:
+                        pass
+                if category == "Other Screenshots":
+                    try:
+                        mtime = os.path.getmtime(src)
+                        category = datetime.datetime.fromtimestamp(mtime).strftime("%B %Y")
+                    except Exception:
+                        pass
+            else:
+                category = ext_to_cat.get(ext_lower, "Other")
+
             dest_dir = os.path.join(folder_path, category)
             os.makedirs(dest_dir, exist_ok=True)
 

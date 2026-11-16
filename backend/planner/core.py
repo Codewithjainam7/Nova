@@ -441,6 +441,8 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             path_match = re.search(r'([a-zA-Z]:\\[^"\'\n\r<>|?*]+)', query)
             if path_match:
                 target_folder = path_match.group(1).strip()
+            elif "screenshot" in q:
+                target_folder = "screenshots"
             elif "desktop" in q:
                 target_folder = "desktop"
             elif "document" in q:

@@ -177,9 +177,9 @@ function createIslandWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth } = primaryDisplay.workAreaSize;
   const islandWidth = 330;
-  const islandHeight = 46;
+  const islandHeight = 44;
   const islandX = Math.round((screenWidth - islandWidth) / 2);
-  const islandY = 12;
+  const islandY = 10;
 
   islandWindow = new BrowserWindow({
     width: islandWidth,
@@ -403,19 +403,19 @@ ipcMain.on('island-expand', (_event, expanded, customHeight) => {
   }
 
   if (expanded) {
-    const targetWidth = 500;
-    const targetHeight = Math.max(customHeight || 280, 280);
+    const targetWidth = 490;
+    const targetHeight = Math.max(customHeight || 220, 220);
     const targetX = Math.round((screenWidth - targetWidth) / 2);
     islandWindow.setBounds({ x: targetX, y: 10, width: targetWidth, height: targetHeight });
   } else {
     collapseTimeout = setTimeout(() => {
       if (islandWindow && !islandWindow.isDestroyed()) {
         const targetWidth = 330;
-        const targetHeight = 48;
+        const targetHeight = 44;
         const targetX = Math.round((screenWidth - targetWidth) / 2);
         islandWindow.setBounds({ x: targetX, y: 10, width: targetWidth, height: targetHeight });
       }
-    }, 280);
+    }, 220);
   }
 });
 
