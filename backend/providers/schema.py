@@ -9,6 +9,12 @@ class ProviderType(str, Enum):
     OLLAMA = "ollama"
     MOCK = "mock"
 
+class CognitiveDomain(str, Enum):
+    REFLEX = "reflex" # Groq: Instant desktop actions, calculator, app launches (<250ms)
+    SOCIAL_SYNTHESIS = "social_synthesis" # Gemini: Nuanced message formulation, human tone, memory
+    DEEP_PLANNING = "deep_planning" # OpenRouter Nemotron: Multi-step strategy, overnight missions
+    VISION = "vision" # Screen understanding & multimodal analysis
+
 class Role(str, Enum):
     SYSTEM = "system"
     USER = "user"
@@ -21,11 +27,12 @@ class Message(BaseModel):
 
 class GenerationRequest(BaseModel):
     messages: List[Message]
-    model: str
+    model: Optional[str] = None
     temperature: float = 0.7
     max_tokens: int = 1024
     stream: bool = False
     provider_type: Optional[ProviderType] = None # Force specific provider
+    cognitive_domain: Optional[CognitiveDomain] = None # Target cognitive domain
     timeout: float = 30.0
     retry_count: int = 3
     json_mode: bool = False

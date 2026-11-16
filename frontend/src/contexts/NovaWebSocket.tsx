@@ -46,23 +46,64 @@ export const NovaWebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
       };
       
       wsChat.current.onmessage = (event) => {
-        const data = JSON.parse(event.data);
-        const { messages } = useNovaStore.getState();
-        if (data.type === 'message_chunk' || data.type === 'message_complete') {
-          if (messages.length === 0) {
-            addMessage({
-              id: data.message.id || Date.now().toString(),
-              role: data.message.role || 'assistant',
-              content: data.message.content,
-              timestamp: Date.now()
-            });
-          } else {
-            replaceLastMessage(data.message.content);
+        try {
+          const data = JSON.parse(event.data);
+          const { messages } = useNovaStore.getState();
+
+          if (data.type === 'message_user') {
+            if (data.message) {
+              addMessage({
+                id: data.message.id || Date.now().toString(),
+                role: 'user',
+                content: data.message.content || '',
+                timestamp: data.message.timestamp || Date.now()
+              });
+            }
+            return;
           }
-          if (data.type === 'message_complete') {
-            setStreaming(false);
-            setIslandState('idle');
+
+          if (data.type === 'message_chunk' || data.type === 'message_complete') {
+            // Never overwrite existing conversation with a reconnect greeting
+            if (data.is_greeting) {
+              if (messages.length === 0) {
+                addMessage({
+                  id: data.message?.id || Date.now().toString(),
+                  role: 'assistant',
+                  content: data.message?.content || '',
+                  timestamp: Date.now()
+                });
+              }
+              return;
+            }
+
+            if (messages.length === 0) {
+              addMessage({
+                id: data.message?.id || Date.now().toString(),
+                role: data.message?.role || 'assistant',
+                content: data.message?.content || '',
+                timestamp: Date.now()
+              });
+            } else {
+              const lastMsg = messages[messages.length - 1];
+              if (lastMsg && lastMsg.role === 'assistant') {
+                replaceLastMessage(data.message?.content || '');
+              } else {
+                addMessage({
+                  id: data.message?.id || Date.now().toString(),
+                  role: data.message?.role || 'assistant',
+                  content: data.message?.content || '',
+                  timestamp: Date.now()
+                });
+              }
+            }
+
+            if (data.type === 'message_complete') {
+              setStreaming(false);
+              setIslandState('idle');
+            }
           }
+        } catch (e) {
+          console.error("Failed to parse chat message", e);
         }
       };
 
@@ -78,6 +119,17 @@ export const NovaWebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         const data = JSON.parse(event.data);
         
         switch(data.type) {
+          case 'WAKE_WORD_DETECTED':
+            try {
+              if ((window as any).electronAPI?.setIslandExpanded) {
+                (window as any).electronAPI.setIslandExpanded(true, 300);
+              }
+            } catch {}
+            setIslandState('voice-listening', data.oral_response || (data.directive ? `Directive: ${data.directive}` : 'Yes, Boss?'));
+            break;
+          case 'WAKE_WORD_LISTENING':
+            setIslandState('voice-listening', data.message || 'Listening to you, Boss...');
+            break;
           case 'KERNEL_STARTED':
           case 'REQUEST_RECEIVED':
             setIslandState('thinking', 'Processing Request...');

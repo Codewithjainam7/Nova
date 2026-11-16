@@ -60,12 +60,11 @@ export const useVoiceRecognition = (options: UseVoiceRecognitionOptions = {}) =>
         for (let i = 0; i < dataArray.length; i++) {
           sum += dataArray[i];
         }
-        const avg = sum / dataArray.length / 255; // Normalize 0-1
+        const avg = sum / dataArray.length / 255;
         setAmplitude(avg);
         
-        // If we hear loud noise, reset the silence timer
         if (avg > 0.05) {
-            resetSilenceTimer();
+          resetSilenceTimer();
         }
         
         animFrameRef.current = requestAnimationFrame(updateAmplitude);
@@ -74,7 +73,7 @@ export const useVoiceRecognition = (options: UseVoiceRecognitionOptions = {}) =>
     } catch (e) {
       console.error('Microphone access denied:', e);
     }
-  }, []);
+  }, [resetSilenceTimer]);
 
   const stopAudioAnalysis = useCallback(() => {
     cancelAnimationFrame(animFrameRef.current);
@@ -90,12 +89,12 @@ export const useVoiceRecognition = (options: UseVoiceRecognitionOptions = {}) =>
   }, []);
 
   const startListening = useCallback(async () => {
-    if (window.speechSynthesis) {
+    // Mute any old speech
+    if (typeof window !== 'undefined' && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
     
     try {
-      // Clean up any old streams
       stopAudioAnalysis();
       
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
@@ -153,7 +152,10 @@ export const useVoiceRecognition = (options: UseVoiceRecognitionOptions = {}) =>
             const data = await response.json();
             if (data.transcript && data.transcript.trim()) {
               setInterimTranscript('');
-              onResult?.({ transcript: data.transcript.trim(), isFinal: true });
+              const raw = data.transcript.trim();
+              // Clean natural wake phrase prefix if present
+              const clean = raw.replace(/^(hey|hi|hello|ok|okay)?\s*(ada|ayda|aida|eda|ida)[\s,.:;!?]*/i, '').trim() || raw;
+              onResult?.({ transcript: clean, isFinal: true });
             } else {
               setInterimTranscript('');
             }
@@ -169,7 +171,7 @@ export const useVoiceRecognition = (options: UseVoiceRecognitionOptions = {}) =>
         onEnd?.();
       };
 
-      mediaRecorder.start(200); // Collect data every 200ms
+      mediaRecorder.start(200);
     } catch (e: any) {
       console.error('Microphone access error:', e);
       setIsListening(false);
@@ -190,7 +192,6 @@ export const useVoiceRecognition = (options: UseVoiceRecognitionOptions = {}) =>
     }
   }, [isListening, startListening, stopListening]);
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       stopListening();
@@ -209,40 +210,58 @@ export const useVoiceRecognition = (options: UseVoiceRecognitionOptions = {}) =>
   };
 };
 
-// Utility: make NOVA speak a response
+// Active studio audio element tracking
+let activeAudio: HTMLAudioElement | null = null;
+let lastSpokenText = '';
+let lastSpokenTime = 0;
+
+/**
+ * ADA Single-Voice Engine:
+ * Strictly uses the ADA V2 Studio Neural Voice (nazirlouis/ada_v2 en-GB-SoniaNeural / Kore persona).
+ * Never uses Windows SAPI / Zira robotic voices.
+ * Deduplicates calls to prevent two voices from ever playing at once.
+ */
 export const speakResponse = (text: string) => {
-  if (!window.speechSynthesis) return;
+  if (!text || !text.trim()) return;
+
+  const cleanText = text.replace(/[*#_`]/g, '').trim();
+  if (!cleanText) return;
+
+  // Prevent duplicate execution if triggered multiple times within 3 seconds
+  const now = Date.now();
+  if (cleanText === lastSpokenText && (now - lastSpokenTime < 3000)) {
+    return;
+  }
+  lastSpokenText = cleanText;
+  lastSpokenTime = now;
+
+  // Cancel any existing audio playback
+  if (activeAudio) {
+    try {
+      activeAudio.pause();
+      activeAudio.currentTime = 0;
+    } catch {}
+    activeAudio = null;
+  }
   
-  // Cancel any ongoing speech
-  window.speechSynthesis.cancel();
-  
-  const utterance = new SpeechSynthesisUtterance(text);
-  utterance.rate = 1.0;
-  const attemptSpeak = (retryCount = 0) => {
-    let voices = window.speechSynthesis.getVoices();
-    
-    // If voices haven't loaded yet (common on page load), wait and retry up to 10 times
-    if (voices.length === 0 && retryCount < 10) {
-        setTimeout(() => attemptSpeak(retryCount + 1), 100);
-        return;
-    }
-    
-    const femaleKeywords = ['zira', 'samantha', 'hazel', 'female', 'susan', 'lisa', 'jenny', 'aria'];
-    const maleKeywords = ['david', 'mark', 'george', 'paul', 'male', 'guy', 'ryan', 'brian'];
-    
-    // Filter out any voice with a male keyword
-    let safeVoices = voices.filter(v => !maleKeywords.some(name => v.name.toLowerCase().includes(name)));
-    
-    // Prioritize known female voices
-    const preferred = safeVoices.find(v => femaleKeywords.some(name => v.name.toLowerCase().includes(name)))
-      || safeVoices.find(v => v.lang.startsWith('en-US')) 
-      || safeVoices.find(v => v.lang.startsWith('en'))
-      || safeVoices[0]; // Strict fallback to a non-male voice, never the unfiltered list
-      
-    if (preferred) utterance.voice = preferred;
-    
-    window.speechSynthesis.speak(utterance);
-  };
-  
-  attemptSpeak();
+  // Make sure native browser speech synthesis is permanently silenced
+  if (typeof window !== 'undefined' && window.speechSynthesis) {
+    try {
+      window.speechSynthesis.cancel();
+    } catch {}
+  }
+
+  // Play exclusively via the ADA V2 Studio Neural Voice backend endpoint
+  try {
+    const ttsUrl = `http://localhost:8000/api/tts?text=${encodeURIComponent(cleanText)}`;
+    const audio = new Audio(ttsUrl);
+    audio.playbackRate = 1.04;
+    activeAudio = audio;
+
+    audio.play().catch((err) => {
+      console.warn('[ADA Voice] Audio playback note:', err);
+    });
+  } catch (e) {
+    console.error('[ADA Voice] Playback initialization error:', e);
+  }
 };

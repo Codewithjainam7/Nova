@@ -5,6 +5,7 @@ import path from 'path';
 
 // https://vitejs.dev/config/
 export default defineConfig({
+  base: './',
   plugins: [
     react(),
     tailwindcss(),
@@ -18,8 +19,24 @@ export default defineConfig({
   server: {
     port: 5173,
     strictPort: true,
+    host: '0.0.0.0',
   },
   optimizeDeps: {
-    include: ['react', 'react-dom', 'three', '@react-three/fiber', '@react-three/drei'],
+    include: [
+      'react',
+      'react-dom',
+      'react/jsx-dev-runtime',
+      'react-dom/client',
+      'three',
+      '@react-three/fiber',
+      '@react-three/drei',
+      'framer-motion',
+      'lucide-react',
+      'clsx',
+      'zustand',
+      'react-markdown',
+      'react-router-dom',
+      'tailwind-merge',
+    ],
   },
 });

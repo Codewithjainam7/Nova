@@ -15,7 +15,7 @@ export interface ExecutionStep {
   description: string;
 }
 
-export type IslandState = 'idle' | 'listening' | 'thinking' | 'executing' | 'browser' | 'desktop' | 'vision' | 'error';
+export type IslandState = 'idle' | 'listening' | 'voice-listening' | 'thinking' | 'executing' | 'browser' | 'desktop' | 'vision' | 'error';
 
 interface NovaState {
   messages: Message[];

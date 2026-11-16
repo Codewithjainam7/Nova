@@ -1,5 +1,6 @@
 import json
 import os
+import time
 import subprocess
 from typing import Dict, Any, Optional
 from backend.core.logger import app_logger
@@ -60,7 +61,7 @@ class DeviceManager:
         """Connect to an Android device over Wi-Fi."""
         try:
             app_logger.info(f"Attempting to connect to device at {ip_port}")
-            result = subprocess.run([self.adb_path, "connect", ip_port], capture_output=True, text=True)
+            result = subprocess.run([self.adb_path, "connect", ip_port], capture_output=True, text=True, timeout=6)
             if "connected to" in result.stdout.lower() or "already connected" in result.stdout.lower():
                 app_logger.info(f"Successfully connected to {ip_port}")
                 if ip_port not in self.connected_devices:
@@ -119,55 +120,438 @@ class DeviceManager:
             app_logger.error(f"Failed to get battery: {e}")
             return f"Error reading battery: {e}"
 
-    def unlock_device(self, target: str):
-        """Wakes up the screen and unlocks the device if a PIN is configured."""
+    def is_locked(self, target: str) -> bool:
+        """Returns True if the device screen is off, dozing, or showing keyguard/lockscreen."""
         try:
-            import time
-            from dotenv import load_dotenv
-            load_dotenv()
-            
-            ADB_TIMEOUT = 15  # Wireless ADB can be slow
-            
-            # Step 1: Wake up screen using POWER button (keyevent 26)
-            # Use grep on device side to avoid transferring entire dumpsys output
-            result = subprocess.run(
-                [self.adb_path, "-s", target, "shell", "dumpsys power | grep mWakefulness"],
-                capture_output=True, text=True, timeout=ADB_TIMEOUT
-            )
-            if "mWakefulness=Awake" not in result.stdout:
-                app_logger.info(f"[{target}] Waking up screen with POWER button.")
-                subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "26"], timeout=ADB_TIMEOUT)
-                time.sleep(2.0)
-            else:
-                app_logger.info(f"[{target}] Screen already awake.")
-                
-            # Step 2: Check if locked and unlock with PIN
-            result = subprocess.run(
-                [self.adb_path, "-s", target, "shell", "dumpsys window | grep -E 'mShowingLockscreen|mDreamingLockscreen|isStatusBarKeyguard'"],
-                capture_output=True, text=True, timeout=ADB_TIMEOUT
-            )
-            lock_info = result.stdout
-            if "mShowingLockscreen=true" in lock_info or "mDreamingLockscreen=true" in lock_info or "isStatusBarKeyguard=true" in lock_info:
-                app_logger.info(f"[{target}] Unlocking device.")
-                # Swipe up to show PIN pad
-                subprocess.run([self.adb_path, "-s", target, "shell", "input", "swipe", "500", "1500", "500", "500"], timeout=ADB_TIMEOUT)
+            res_p = subprocess.run([self.adb_path, "-s", target, "shell", "dumpsys", "power"], capture_output=True, text=True, timeout=5)
+            if "mWakefulness=Awake" not in res_p.stdout:
+                return True
+            res_k = subprocess.run([self.adb_path, "-s", target, "shell", "dumpsys", "window", "policy"], capture_output=True, text=True, timeout=5)
+            if "showing=true" in res_k.stdout:
+                return True
+            res_f = subprocess.run([self.adb_path, "-s", target, "shell", "dumpsys", "window", "displays"], capture_output=True, text=True, timeout=5)
+            for line in res_f.stdout.splitlines():
+                if "mCurrentFocus" in line:
+                    if any(k in line for k in ["NotificationShade", "Keyguard", "StatusBar"]):
+                        return True
+        except Exception as e:
+            app_logger.warning(f"Error checking lock state: {e}")
+        return False
+
+    def unlock_device(self, target: str):
+        """Wakes up and unlocks an Android device if locked."""
+        try:
+            if not self.is_locked(target):
+                app_logger.info(f"[{target}] Device already awake and unlocked.")
+                return
+
+            app_logger.info(f"[{target}] Device is locked/sleeping. Initiating wake and unlock...")
+            res_p = subprocess.run([self.adb_path, "-s", target, "shell", "dumpsys", "power"], capture_output=True, text=True, timeout=5)
+            if "mWakefulness=Awake" not in res_p.stdout:
+                subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "26"], timeout=5)
+                import time
                 time.sleep(1.0)
                 
-                pin = os.getenv("ANDROID_PIN")
-                if pin:
-                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", pin], timeout=ADB_TIMEOUT)
-                    time.sleep(0.5)
-                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "66"], timeout=ADB_TIMEOUT)
-                    time.sleep(1.5)
-            else:
-                app_logger.info(f"[{target}] Device not locked.")
+            # Swipe up to show PIN pad
+            subprocess.run([self.adb_path, "-s", target, "shell", "input", "swipe", "500", "1800", "500", "500", "200"], timeout=5)
+            import time
+            time.sleep(1.0)
             
-            # Step 3: Go to home screen to ensure a clean state
-            app_logger.info(f"[{target}] Returning to home screen.")
-            subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "3"], timeout=ADB_TIMEOUT)
-            time.sleep(0.5)
+            pin = os.getenv("ANDROID_PIN", "860000")
+            if pin:
+                subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", pin], timeout=5)
+                time.sleep(0.5)
+                subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "66"], timeout=5)
+                time.sleep(1.5)
+            app_logger.info(f"[{target}] Unlock sequence completed.")
         except Exception as e:
             app_logger.error(f"Failed to unlock device: {e}")
+
+    def dump_ui(self, target: str):
+        """Dumps current on-screen UI hierarchy directly via exec-out and returns parsed ElementTree root."""
+        try:
+            res = subprocess.run([self.adb_path, "-s", target, "exec-out", "uiautomator", "dump", "/dev/tty"], capture_output=True, timeout=8)
+            xml_bytes = res.stdout
+            if xml_bytes and b"</hierarchy>" in xml_bytes:
+                xml_bytes = xml_bytes[:xml_bytes.rfind(b"</hierarchy>") + len(b"</hierarchy>")]
+                import xml.etree.ElementTree as ET
+                return ET.fromstring(xml_bytes)
+        except Exception as e:
+            app_logger.warning(f"Fast dump_ui failed: {e}. Trying fallback...")
+            
+        try:
+            subprocess.run([self.adb_path, "-s", target, "shell", "uiautomator", "dump", "/sdcard/ui_dump.xml"], capture_output=True, timeout=8)
+            res2 = subprocess.run([self.adb_path, "-s", target, "shell", "cat", "/sdcard/ui_dump.xml"], capture_output=True, timeout=5)
+            if res2.stdout and b"</hierarchy>" in res2.stdout:
+                import xml.etree.ElementTree as ET
+                return ET.fromstring(res2.stdout)
+        except Exception as e:
+            app_logger.warning(f"Fallback dump_ui failed: {e}")
+        return None
+
+    def get_node_center(self, node) -> Optional[tuple]:
+        """Calculates center (x, y) coordinates from a node's bounds='[x1,y1][x2,y2]'."""
+        import re
+        if node is None:
+            return None
+        bounds = node.get("bounds", "")
+        m = re.match(r'\[(\d+),(\d+)\]\[(\d+),(\d+)\]', bounds)
+        if m:
+            x1, y1, x2, y2 = map(int, m.groups())
+            return (x1 + x2) // 2, (y1 + y2) // 2
+        return None
+
+    def find_node_by_id(self, root, resource_id: str):
+        """Finds first XML node with matching resource-id."""
+        if root is None:
+            return None
+        for n in root.iter("node"):
+            if n.get("resource-id") == resource_id:
+                return n
+        return None
+
+    def resolve_contact(self, contact: str, app: str = "whatsapp") -> str:
+        """Resolves saved aliases for contacts (e.g. Manav -> Vedya on WhatsApp, Nandini -> Heera on Instagram)."""
+        if not contact:
+            return contact
+        contacts_file = os.path.join(os.path.dirname(__file__), "known_contacts.json")
+        if os.path.exists(contacts_file):
+            try:
+                with open(contacts_file, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    c_lower = contact.strip().lower()
+                    if c_lower in data:
+                        mapping = data[c_lower]
+                        if isinstance(mapping, dict):
+                            app_clean = app.lower().strip()
+                            if app_clean in ["instagram", "insta"]:
+                                resolved = mapping.get("instagram", contact)
+                            elif app_clean in ["whatsapp"]:
+                                resolved = mapping.get("whatsapp", mapping.get("default", contact))
+                            else:
+                                resolved = mapping.get(app_clean, mapping.get("default", contact))
+                            app_logger.info(f"Resolved contact alias: '{contact}' -> '{resolved}' for {app}")
+                            return resolved
+                        elif isinstance(mapping, str):
+                            app_logger.info(f"Resolved contact alias: '{contact}' -> '{mapping}'")
+                            return mapping
+            except Exception as e:
+                app_logger.warning(f"Error reading known_contacts.json: {e}")
+        return contact
+
+    def _sanitize_adb_text(self, text: str) -> str:
+        """Sanitizes text for ADB shell input command, preserving capitalization, commas, and punctuation."""
+        replacements = {
+            '’': "'", '‘': "'", '“': '"', '”': '"',
+            '—': '-', '–': '-', '…': '...'
+        }
+        for orig, rep in replacements.items():
+            text = text.replace(orig, rep)
+        
+        clean = "".join([c for c in text if 32 <= ord(c) < 127])
+        escaped = ""
+        for ch in clean:
+            if ch == " ":
+                escaped += "%s"
+            elif ch in ['\\', '"', "'", '?', '!', '&', ';', '(', ')', '<', '>', '|', '$', '`', '#', '*', '~']:
+                escaped += f"\\{ch}"
+            else:
+                escaped += ch
+        return escaped
+
+    def get_foreground_app(self, target: str) -> str:
+        """Returns the package name of the currently visible and focused application window."""
+        try:
+            res = subprocess.run(
+                [self.adb_path, "-s", target, "shell", "dumpsys", "window", "displays"],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in res.stdout.splitlines():
+                if "mCurrentFocus" in line:
+                    import re
+                    m = re.search(r'Window\{[0-9a-fA-F]+\s+u\d+\s+([a-zA-Z0-9_\.]+)', line)
+                    if m:
+                        return m.group(1)
+                    if any(k in line for k in ["NotificationShade", "Keyguard", "StatusBar"]):
+                        return "com.android.systemui"
+            
+            res_top = subprocess.run(
+                [self.adb_path, "-s", target, "shell", "dumpsys", "activity", "top"],
+                capture_output=True, text=True, timeout=5
+            )
+            for line in res_top.stdout.splitlines():
+                line = line.strip()
+                if line.startswith("ACTIVITY "):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        return parts[1].split("/")[0]
+        except Exception as e:
+            app_logger.warning(f"Failed to get foreground app: {e}")
+        return ""
+
+    def ensure_foreground_app(self, target: str, package: str, max_retries: int = 3) -> bool:
+        """
+        State Awareness Guard:
+        Verifies if the specified package is actively in the foreground.
+        If the user closed it, pressed home, or switched apps, ADA automatically
+        re-launches or brings it back to the foreground before performing any input.
+        """
+        import time
+        for attempt in range(max_retries):
+            fg = self.get_foreground_app(target)
+            if package in fg:
+                return True
+            app_logger.info(f"Target app '{package}' not in foreground (currently '{fg}'). Restoring app to foreground (attempt {attempt+1}/{max_retries})...")
+            # Wake and unlock if needed
+            self.unlock_device(target)
+            # Re-launch package
+            subprocess.run(
+                [self.adb_path, "-s", target, "shell", "monkey", "-p", package, "-c", "android.intent.category.LAUNCHER", "1"],
+                capture_output=True, text=True, timeout=10
+            )
+            time.sleep(2.0)
+        return package in self.get_foreground_app(target)
+
+    def hide_keyboard_if_shown(self, target: str):
+        """Dismisses the on-screen soft keyboard if active so UI buttons are not obscured by the keyboard's Next Line key."""
+        try:
+            for _ in range(2):
+                res = subprocess.run([self.adb_path, "-s", target, "shell", "dumpsys", "input_method"], capture_output=True, text=True, timeout=5, encoding="utf-8", errors="replace")
+                if res.stdout and "mInputShown=true" in res.stdout:
+                    # In Android, when the IME soft keyboard is shown, keyevent 4 (BACK) is consumed
+                    # exclusively by the IME to close itself, without popping the activity.
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "4"], timeout=5)
+                    time.sleep(0.5)
+                else:
+                    break
+        except Exception as e:
+            app_logger.warning(f"Failed to hide soft keyboard: {e}")
+
+    def _open_whatsapp_chat(self, target: str, contact: str, max_attempts: int = 4) -> bool:
+        """
+        State-Aware Self-Healing Navigator:
+        Ensures WhatsApp is in the foreground and reliably navigates into the chat thread
+        with the specified contact. Recovers gracefully if interrupted or minimized.
+        """
+        import time
+        package = "com.whatsapp"
+        
+        for attempt in range(max_attempts):
+            if not self.ensure_foreground_app(target, package):
+                app_logger.warning(f"Attempt {attempt+1}: WhatsApp not in foreground.")
+                time.sleep(1.0)
+                continue
+                
+            ui_state = self.dump_ui(target)
+            if ui_state is None:
+                time.sleep(1.0)
+                continue
+                
+            # State 1: Are we ALREADY in the correct chat thread?
+            chat_name_node = self.find_node_by_id(ui_state, "com.whatsapp:id/conversation_contact_name")
+            if chat_name_node is not None:
+                chat_name = chat_name_node.get("text", "")
+                if contact.lower() in chat_name.lower():
+                    app_logger.info(f"Confirmed in chat thread with '{chat_name}'.")
+                    return True
+                else:
+                    # In someone else's chat thread! Safely back out to chat list
+                    app_logger.info(f"Currently in chat with '{chat_name}', expected '{contact}'. Pressing BACK...")
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "4"])
+                    time.sleep(1.0)
+                    continue
+
+            # State 2: Are we in the Search Screen?
+            search_input = self.find_node_by_id(ui_state, "com.whatsapp:id/search_input")
+            if search_input is not None:
+                app_logger.info(f"In WhatsApp Search screen. Typing contact '{contact}'...")
+                contact_safe = self._sanitize_adb_text(contact)
+                subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", contact_safe])
+                time.sleep(1.5)
+                
+                # Check search results
+                ui_results = self.dump_ui(target)
+                contact_target_node = None
+                if ui_results is not None:
+                    for node in ui_results.iter("node"):
+                        txt = node.get("text", "")
+                        desc = node.get("content-desc", "")
+                        if contact.lower() in txt.lower() or contact.lower() in desc.lower():
+                            contact_target_node = node
+                            break
+                    if contact_target_node is None:
+                        contact_target_node = self.find_node_by_id(ui_results, "com.whatsapp:id/contact_row_container")
+                
+                if contact_target_node is not None:
+                    coords = self.get_node_center(contact_target_node)
+                    if coords:
+                        subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                    else:
+                        subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "500", "610"])
+                else:
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "500", "610"])
+                time.sleep(1.5)
+                
+                # Verify we entered the chat thread
+                ui_verify = self.dump_ui(target)
+                if ui_verify is not None and self.find_node_by_id(ui_verify, "com.whatsapp:id/conversation_contact_name") is not None:
+                    return True
+                continue
+
+            # State 3: Are we on WhatsApp Main Home / Chat List?
+            # 3a: Check if contact is ALREADY visible in the active chat list!
+            found_contact_node = None
+            for node in ui_state.iter("node"):
+                if node.get("resource-id") == "com.whatsapp:id/conversations_row_contact_name":
+                    if contact.lower() in node.get("text", "").lower():
+                        found_contact_node = node
+                        break
+            
+            if found_contact_node is not None:
+                coords = self.get_node_center(found_contact_node)
+                if coords:
+                    app_logger.info(f"Contact '{contact}' found directly on chat list at {coords}. Tapping...")
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                    time.sleep(1.5)
+                    ui_verify = self.dump_ui(target)
+                    if ui_verify is not None and self.find_node_by_id(ui_verify, "com.whatsapp:id/conversation_contact_name") is not None:
+                        return True
+                    continue
+
+            # 3b: Tap search bar
+            search_bar = self.find_node_by_id(ui_state, "com.whatsapp:id/search_bar_inner_layout")
+            if search_bar is not None:
+                coords = self.get_node_center(search_bar)
+                if coords:
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                else:
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "617", "342"])
+                time.sleep(1.2)
+                continue
+
+            # State 4: Unknown screen within WhatsApp -> Press BACK to recover to main home
+            app_logger.info("WhatsApp in non-home state. Navigating back to home...")
+            subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "4"])
+            time.sleep(1.0)
+            
+        return False
+
+    def _open_instagram_chat(self, target: str, contact: str, max_attempts: int = 4) -> bool:
+        """
+        State-Aware Self-Healing Navigator for Instagram:
+        Ensures Instagram is in foreground, navigates to Direct Inbox, searches or locates
+        the contact chat, and enters the chat thread without any risk of opening Notifications.
+        """
+        import time
+        package = "com.instagram.android"
+        
+        for attempt in range(max_attempts):
+            if not self.ensure_foreground_app(target, package):
+                app_logger.warning(f"Attempt {attempt+1}: Instagram not in foreground.")
+                time.sleep(1.0)
+                continue
+                
+            ui_state = self.dump_ui(target)
+            if ui_state is None:
+                time.sleep(1.0)
+                continue
+
+            # State 1: Are we ALREADY in a chat thread with the contact?
+            composer = self.find_node_by_id(ui_state, "com.instagram.android:id/row_thread_composer_edittext")
+            if composer is not None:
+                for node in ui_state.iter("node"):
+                    txt = node.get("text", "")
+                    if contact.lower() in txt.lower():
+                        app_logger.info(f"Confirmed in Instagram chat thread with '{contact}'.")
+                        return True
+                title_node = self.find_node_by_id(ui_state, "com.instagram.android:id/action_bar_title") or self.find_node_by_id(ui_state, "com.instagram.android:id/thread_title")
+                if title_node is not None:
+                    t_txt = title_node.get("text", "")
+                    if contact.lower() in t_txt.lower():
+                        app_logger.info(f"Confirmed in Instagram chat thread with '{t_txt}'.")
+                        return True
+                    else:
+                        app_logger.info(f"Currently in chat with '{t_txt}', expected '{contact}'. Pressing BACK...")
+                        subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "4"])
+                        time.sleep(1.0)
+                        continue
+                return True
+
+            # State 2: Are we in the "New Message" search screen?
+            new_msg_search = self.find_node_by_id(ui_state, "com.instagram.android:id/search_edit_text")
+            if new_msg_search is not None:
+                app_logger.info(f"In Instagram New Message screen. Typing contact '{contact}'...")
+                coords = self.get_node_center(new_msg_search)
+                if coords:
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                    time.sleep(0.5)
+                contact_safe = self._sanitize_adb_text(contact)
+                subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", contact_safe])
+                time.sleep(2.0)
+                
+                ui_results = self.dump_ui(target)
+                if ui_results is not None:
+                    target_row = None
+                    for node in ui_results.iter("node"):
+                        txt = node.get("text", "")
+                        desc = node.get("content-desc", "")
+                        if contact.lower() in txt.lower() or contact.lower() in desc.lower():
+                            if node.get("resource-id") in ["com.instagram.android:id/row_user_primary_name", "com.instagram.android:id/row_user_secondary_name"]:
+                                target_row = node
+                                break
+                    if target_row is not None:
+                        coords = self.get_node_center(target_row)
+                        if coords:
+                            subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                            time.sleep(1.5)
+                            return True
+                continue
+
+            # State 3: Are we in Instagram Direct Inbox?
+            inbox_bar = self.find_node_by_id(ui_state, "com.instagram.android:id/direct_inbox_action_bar")
+            new_msg_btn = None
+            for node in ui_state.iter("node"):
+                if node.get("content-desc") == "New Message":
+                    new_msg_btn = node
+                    break
+                    
+            if inbox_bar is not None or new_msg_btn is not None:
+                # 3a: Check if contact is ALREADY in the active DM inbox list!
+                for node in ui_state.iter("node"):
+                    txt = node.get("text", "")
+                    if contact.lower() in txt.lower() and node.get("resource-id") in ["com.instagram.android:id/row_inbox_username", "com.instagram.android:id/row_inbox_digest"]:
+                        coords = self.get_node_center(node)
+                        if coords:
+                            app_logger.info(f"Contact '{contact}' found directly in DM inbox list at {coords}. Tapping...")
+                            subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                            time.sleep(1.5)
+                            return True
+                            
+                # 3b: Tap 'New Message' button
+                if new_msg_btn is not None:
+                    coords = self.get_node_center(new_msg_btn)
+                    if coords:
+                        app_logger.info(f"Tapping New Message button at {coords}...")
+                        subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                        time.sleep(1.5)
+                        continue
+
+            # State 4: On Instagram Home Feed or other tab? Look for direct_tab on bottom bar
+            direct_tab = self.find_node_by_id(ui_state, "com.instagram.android:id/direct_tab")
+            if direct_tab is not None:
+                coords = self.get_node_center(direct_tab)
+                if coords:
+                    app_logger.info(f"Tapping Direct tab on bottom bar at {coords}...")
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                    time.sleep(1.5)
+                    continue
+
+            # Fallback: Launch Direct Inbox intent
+            app_logger.info("Launching instagram://direct-inbox intent...")
+            subprocess.run([self.adb_path, "-s", target, "shell", "am", "start", "-a", "android.intent.action.VIEW", "-d", "instagram://direct-inbox"])
+            time.sleep(2.0)
+            
+        return False
 
     def execute_action(self, intent: str, entity: str, **kwargs) -> str:
         """Executes a semantic action on the primary connected device."""
@@ -234,7 +618,10 @@ class DeviceManager:
                 "calculator": "com.google.android.calculator",
                 "files": "com.google.android.apps.nbu.files",
                 "google files": "com.google.android.apps.nbu.files",
-                "downloads": "com.android.providers.downloads.ui"
+                "downloads": "com.android.providers.downloads.ui",
+                "instagram": "com.instagram.android",
+                "whatsapp": "com.whatsapp",
+                "telegram": "org.telegram.messenger"
             }
             package = app_package_map.get(entity.lower(), entity.lower())
             try:
@@ -325,84 +712,152 @@ class DeviceManager:
                 self.unlock_device(target)
                 contact = entity
                 message = kwargs.get("message", "")
-                app = kwargs.get("app", "whatsapp").lower()
+                raw_app = kwargs.get("app", "whatsapp")
+                app = raw_app.lower() if raw_app else "whatsapp"
+                if not app or app in ["messaging", "phone", "default", "none"]:
+                    app = "whatsapp"
                 
-                app_logger.info(f"[{target}] Sending {app} message to '{contact}': {message}")
+                pkg_map = {
+                    "whatsapp": "com.whatsapp",
+                    "telegram": "org.telegram.messenger",
+                    "instagram": "com.instagram.android"
+                }
+                package = pkg_map.get(app, "com.whatsapp")
                 
+                app_logger.info(f"[{target}] State-Aware {app} message to '{contact}': {message}")
                 import time
+                
+                # Step 1: Ensure target app is launched and focused
+                if not self.ensure_foreground_app(target, package):
+                    return f"Failed to bring {app.capitalize()} to foreground on phone."
+                time.sleep(1.0)
+                
                 if app == "telegram":
-                    # Launch Telegram
-                    subprocess.run([self.adb_path, "-s", target, "shell", "monkey", "-p", "org.telegram.messenger", "-c", "android.intent.category.LAUNCHER", "1"])
-                    time.sleep(3.0)
-                    
                     # Tap Search Icon (Top Right)
                     subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "950", "150"])
                     time.sleep(1.0)
                     
-                    # Type Contact Name
-                    contact_safe = contact.replace(" ", "%s")
+                    self.ensure_foreground_app(target, package)
+                    contact_safe = self._sanitize_adb_text(contact)
                     subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", contact_safe])
                     time.sleep(2.0)
                     
-                    # Close keyboard to see results
                     subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "4"])
                     time.sleep(1.0)
                     
-                    # Tap First Result (Below search header, around x=500, y=350)
+                    self.ensure_foreground_app(target, package)
                     subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "500", "350"])
                     time.sleep(1.5)
                     
-                    # Type Message
-                    message_safe = message.replace(" ", "%s").replace("'", "\\'")
-                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", message_safe])
+                    self.ensure_foreground_app(target, package)
+                    message_safe = self._sanitize_adb_text(message)
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", message_safe], timeout=15)
                     time.sleep(1.5)
                     
-                    # Close keyboard
                     subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "4"])
                     time.sleep(1.0)
                     
-                    # Tap Send Button (Bottom Right, Telegram send button)
                     subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "980", "2250"])
                     time.sleep(1.0)
-                    
                     return f"Successfully sent Telegram message to {contact}."
+
+                elif app == "instagram":
+                    resolved_contact = self.resolve_contact(contact, "instagram")
+                    app_logger.info(f"[{target}] Navigating to Instagram chat with '{resolved_contact}'...")
+                    
+                    chat_ready = self._open_instagram_chat(target, resolved_contact)
+                    if not chat_ready:
+                        return f"Failed to locate or open Instagram chat for {resolved_contact}."
+
+                    if not self.ensure_foreground_app(target, package):
+                        return "Interrupted: Instagram lost focus."
+
+                    # Find composer edittext
+                    ui_chat = self.dump_ui(target)
+                    composer = self.find_node_by_id(ui_chat, "com.instagram.android:id/row_thread_composer_edittext") if ui_chat is not None else None
+                    if composer is not None:
+                        coords = self.get_node_center(composer)
+                        if coords:
+                            subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                    else:
+                        subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "382", "2300"])
+                    time.sleep(0.8)
+
+                    if not self.ensure_foreground_app(target, package):
+                        return "Interrupted: Instagram lost focus."
+
+                    # Type the message
+                    message_safe = self._sanitize_adb_text(message)
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", message_safe], timeout=15)
+                    time.sleep(1.0)
+
+                    # Hide keyboard
+                    self.hide_keyboard_if_shown(target)
+                    time.sleep(0.8)
+
+                    if not self.ensure_foreground_app(target, package):
+                        return "Interrupted: Instagram lost focus."
+
+                    # Find and tap Send button
+                    ui_send = self.dump_ui(target)
+                    send_btn = None
+                    if ui_send is not None:
+                        send_btn = self.find_node_by_id(ui_send, "com.instagram.android:id/row_thread_composer_send_button_background")
+                        if send_btn is None:
+                            for node in ui_send.iter("node"):
+                                if node.get("content-desc") == "Send" or node.get("text") == "Send":
+                                    send_btn = node
+                                    break
+                    if send_btn is not None:
+                        coords = self.get_node_center(send_btn)
+                        if coords:
+                            subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", str(coords[0]), str(coords[1])])
+                    else:
+                        subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "988", "2300"])
+                    time.sleep(1.0)
+                    return f"Successfully sent Instagram message to {resolved_contact}."
+
                 else:
                     # Default to WhatsApp
-                    # Launch WhatsApp
-                    subprocess.run([self.adb_path, "-s", target, "shell", "monkey", "-p", "com.whatsapp", "-c", "android.intent.category.LAUNCHER", "1"])
-                    time.sleep(3.0)
+                    # Resolve contact alias (e.g. Manav -> Vedya)
+                    resolved_contact = self.resolve_contact(contact, "whatsapp")
+                    app_logger.info(f"[{target}] Navigating to WhatsApp chat with '{resolved_contact}'...")
                     
-                    # Tap Search Icon
-                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "84"])
+                    # State-Aware Self-Healing Navigation into Chat
+                    chat_ready = self._open_whatsapp_chat(target, resolved_contact)
+                    if not chat_ready:
+                        return f"Failed to locate or open WhatsApp chat for {resolved_contact}."
+
+                    # Verify still in foreground
+                    if not self.ensure_foreground_app(target, package):
+                        return "Interrupted: WhatsApp lost focus."
+
+                    # Tap message entry composer (center: 329, 2321) - verified node com.whatsapp:id/entry
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "329", "2321"])
+                    time.sleep(0.5)
+
+                    # Guard: verify STILL focused before typing
+                    if not self.ensure_foreground_app(target, package):
+                        return "Interrupted: WhatsApp lost focus."
+
+                    # Type the message
+                    message_safe = self._sanitize_adb_text(message)
+                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", message_safe], timeout=15)
                     time.sleep(1.0)
-                    
-                    # Type Contact Name
-                    contact_safe = contact.replace(" ", "%s")
-                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", contact_safe])
-                    time.sleep(2.0)
-                    
-                    # Close keyboard to ensure first result is visible
-                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "4"])
-                    time.sleep(1.0)
-                    
-                    # Tap First Result (Below search bar filters)
-                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "500", "600"])
-                    time.sleep(1.5)
-                    
-                    # Type Message
-                    message_safe = message.replace(" ", "%s").replace("'", "\\'")
-                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "text", message_safe])
-                    time.sleep(1.5)
-                    
-                    # Close keyboard to ensure send button is at the bottom right
-                    subprocess.run([self.adb_path, "-s", target, "shell", "input", "keyevent", "4"])
-                    time.sleep(1.0)
-                    
-                    # Tap Send Button (Bottom Right, around 988 2319 on 2400h screens)
+
+                    # Dismiss soft keyboard so its Return/Next Line key does not intercept Send tap
+                    self.hide_keyboard_if_shown(target)
+                    time.sleep(0.8)
+
+                    # Verify STILL focused before sending
+                    if not self.ensure_foreground_app(target, package):
+                        return "Interrupted: WhatsApp lost focus."
+
+                    # Tap Send Button (center: 988, 2319) - verified node com.whatsapp:id/send_container
                     subprocess.run([self.adb_path, "-s", target, "shell", "input", "tap", "988", "2319"])
                     time.sleep(1.0)
-                    
-                    return f"Successfully sent WhatsApp message to {contact}."
+
+                    return f"Successfully sent WhatsApp message to {resolved_contact}."
             except Exception as e:
                 app_logger.error(f"Failed to send message: {e}")
                 return f"Failed to send message: {e}"

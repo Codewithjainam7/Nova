@@ -1,0 +1,283 @@
+"""
+ADA Mark VII - Autonomous Wake Word & Real-time Voice Listener Engine
+Listens continuously for "Hey ADA" or "ADA" across the operating system.
+When triggered with "Hey ADA", verbally responds with "Yes, Boss?" or "Yeah, Boss?"
+in ADA's signature Sonia HD studio neural voice, then actively listens for and
+executes the user's spoken directive with ultra-fast Groq Whisper transcription.
+"""
+
+import os
+import re
+import time
+import io
+import wave
+import random
+import threading
+import winsound
+from typing import Optional, Callable
+import speech_recognition as sr
+from backend.core.logger import app_logger
+
+# Phonetic & natural regex variations of "Hey ADA"
+WAKE_REGEX = re.compile(
+    r'\b(?:hey|hi|hello|ok|okay)?\s*(?:ada|ayda|aida|eda|ida)\b[\s,.:;!?]*',
+    re.IGNORECASE
+)
+
+# Pre-rendered natural studio responses in Sonia HD persona
+WAKE_RESPONSES = [
+    ("yes_boss_1.wav", "Yes, Boss?"),
+    ("yes_boss_2.wav", "Yeah, Boss?"),
+    ("yes_boss_1.wav", "Yes, Boss?"),
+    ("yes_boss_2.wav", "Yeah, Boss?"),
+    ("yes_boss_3.wav", "At your service, Boss."),
+    ("yes_boss_4.wav", "I'm here, Boss."),
+    ("yes_boss_5.wav", "Listening, Boss.")
+]
+
+class WakeWordService:
+    def __init__(
+        self,
+        on_wake_detected: Optional[Callable[[str, str, str], None]] = None,
+        on_listening_state: Optional[Callable[[str], None]] = None,
+        on_directive_ready: Optional[Callable[[str], None]] = None
+    ):
+        self.on_wake_detected = on_wake_detected
+        self.on_listening_state = on_listening_state
+        self.on_directive_ready = on_directive_ready
+        
+        self.recognizer = sr.Recognizer()
+        self.recognizer.dynamic_energy_threshold = True
+        self.recognizer.pause_threshold = 0.8
+        self.recognizer.phrase_threshold = 0.3
+        self.recognizer.non_speaking_duration = 0.5
+        
+        self.microphone: Optional[sr.Microphone] = None
+        self._thread: Optional[threading.Thread] = None
+        self._stop_event = threading.Event()
+        self.is_running = False
+        self.is_speaking = False  # Suppress listening while ADA speaks
+        self.groq_api_key = os.getenv("GROQ_API_KEY", "")
+
+        # Sound directory paths
+        base_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        self.wake_sound_dir = os.path.join(base_dir, "backend", "voice", "wake_responses")
+
+    def play_oral_acknowledgement(self) -> str:
+        """Plays a pre-rendered Sonia HD verbal greeting ('Yes, Boss?' / 'Yeah, Boss?')."""
+        choice_file, text = random.choice(WAKE_RESPONSES)
+        wav_path = os.path.join(self.wake_sound_dir, choice_file)
+        app_logger.info(f"[WakeWord] Playing verbal response: '{text}' ({choice_file})")
+        
+        try:
+            if os.path.exists(wav_path):
+                # Play synchronously on the background daemon thread
+                winsound.PlaySound(wav_path, winsound.SND_FILENAME)
+            else:
+                app_logger.warning(f"[WakeWord] Wav not found: {wav_path}")
+        except Exception as e:
+            app_logger.error(f"[WakeWord] Audio playback error: {e}")
+            
+        return text
+
+    def set_speaking(self, speaking: bool):
+        """Pauses listener while ADA speaks to prevent acoustic self-triggering."""
+        self.is_speaking = speaking
+        app_logger.debug(f"[WakeWord] Speaking state set to: {speaking}")
+
+    def _transcribe_audio(self, audio_data: sr.AudioData) -> str:
+        """Transcribes audio using Groq Whisper (~150ms) or Google Speech fallback."""
+        wav_bytes = audio_data.get_wav_data(convert_rate=16000, convert_width=2)
+        
+        # 1. Groq Whisper Turbo (~150ms, world-class precision)
+        if self.groq_api_key:
+            try:
+                from groq import Groq
+                client = Groq(api_key=self.groq_api_key)
+                res = client.audio.transcriptions.create(
+                    file=("audio.wav", wav_bytes),
+                    model="whisper-large-v3-turbo",
+                    response_format="json",
+                    language="en",
+                    prompt="Hey Ada, Ada, Spotify, WhatsApp, Chrome, Windows, battery"
+                )
+                text = (res.text or "").strip()
+                if text:
+                    return text
+            except Exception as e:
+                app_logger.warning(f"[WakeWord] Groq Whisper error: {e}. Falling back to Google Speech.")
+
+        # 2. Fallback: Free Google Speech Recognizer
+        try:
+            text = self.recognizer.recognize_google(audio_data)
+            return (text or "").strip()
+        except Exception:
+            return ""
+
+    def _listen_loop(self):
+        """Continuous background thread listening to default OS microphone."""
+        app_logger.info("[WakeWord] Background microphone listener thread started.")
+        
+        try:
+            self.microphone = sr.Microphone()
+            with self.microphone as source:
+                app_logger.info("[WakeWord] Calibrating microphone for ambient room acoustics...")
+                self.recognizer.adjust_for_ambient_noise(source, duration=0.8)
+                if self.recognizer.energy_threshold < 150:
+                    self.recognizer.energy_threshold = 150
+                app_logger.info(f"[WakeWord] Calibrated. Baseline energy threshold: {self.recognizer.energy_threshold:.1f}")
+        except Exception as e:
+            app_logger.error(f"[WakeWord] Failed to initialize microphone: {e}")
+            self.is_running = False
+            return
+
+        while not self._stop_event.is_set():
+            # If ADA is speaking, sleep briefly to avoid listening to own TTS output
+            if self.is_speaking:
+                time.sleep(0.15)
+                continue
+
+            try:
+                with self.microphone as source:
+                    audio = self.recognizer.listen(
+                        source,
+                        timeout=1.0,
+                        phrase_time_limit=8.0
+                    )
+            except sr.WaitTimeoutError:
+                continue
+            except Exception as e:
+                app_logger.debug(f"[WakeWord] Listen capture error: {e}")
+                time.sleep(0.1)
+                continue
+
+            if self.is_speaking:
+                continue
+
+            # Transcribe phrase
+            transcript = self._transcribe_audio(audio)
+            if not transcript:
+                continue
+
+            app_logger.info(f"[WakeWord] Heard speech: '{transcript}'")
+
+            # Check for "Hey ADA" or "ADA"
+            match = WAKE_REGEX.search(transcript)
+            if match:
+                wake_phrase = match.group(0).strip()
+                directive = transcript[match.end():].strip()
+                app_logger.info(f"[WakeWord] *** WAKE WORD DETECTED: '{wake_phrase}' | Directive: '{directive}' ***")
+                
+                if directive and self.on_directive_ready:
+                    # User spoke the directive in one breath (e.g. "Hey Ada what's my phone battery")
+                    if self.on_wake_detected:
+                        try:
+                            self.on_wake_detected(wake_phrase, directive, "Processing...")
+                        except Exception as ex:
+                            app_logger.error(f"[WakeWord] Error in on_wake_detected callback: {ex}")
+                    try:
+                        self.on_directive_ready(directive)
+                    except Exception as ex:
+                        app_logger.error(f"[WakeWord] Error in on_directive_ready callback: {ex}")
+                else:
+                    # User said just "Hey Ada", verbally respond with "Yes, Boss?" and then listen!
+                    self._respond_and_listen_for_directive(wake_phrase)
+
+        app_logger.info("[WakeWord] Background microphone listener thread stopped.")
+
+    def _respond_and_listen_for_directive(self, wake_phrase: str):
+        """Verbally says 'Yes, Boss?' in Sonia HD, expands UI, then listens for command."""
+        self.set_speaking(True)
+        
+        # Pick response text
+        oral_text = "Yes, Boss?"
+        choice_file, oral_text = random.choice(WAKE_RESPONSES)
+        wav_path = os.path.join(self.wake_sound_dir, choice_file)
+        
+        # 1. Notify frontend UI to expand into active listening mode
+        if self.on_wake_detected:
+            try:
+                self.on_wake_detected(wake_phrase, "", oral_text)
+            except Exception as ex:
+                app_logger.error(f"[WakeWord] Callback error: {ex}")
+
+        # 2. Speak "Yes, Boss?" synchronously
+        try:
+            if os.path.exists(wav_path):
+                winsound.PlaySound(wav_path, winsound.SND_FILENAME)
+        except Exception as e:
+            app_logger.error(f"[WakeWord] Audio playback error: {e}")
+
+        # Brief delay to let audio buffer finish playing before mic opens
+        time.sleep(0.18)
+        self.set_speaking(False)
+
+        # 3. Update UI to indicate she is now listening to your words
+        if self.on_listening_state:
+            try:
+                self.on_listening_state("Listening to you, Boss...")
+            except Exception as ex:
+                app_logger.error(f"[WakeWord] Callback error: {ex}")
+
+        # 4. Now listen for the user's spoken command!
+        self._listen_for_followup()
+
+    def _listen_for_followup(self):
+        """Actively waits and listens for user's command after wake word is spoken."""
+        app_logger.info("[WakeWord] Awaiting spoken command from user...")
+        if not self.microphone:
+            return
+
+        try:
+            with self.microphone as source:
+                # Active listening window: up to 6.5s timeout, up to 12s speech
+                followup_audio = self.recognizer.listen(
+                    source,
+                    timeout=6.5,
+                    phrase_time_limit=12.0
+                )
+                
+            followup_text = self._transcribe_audio(followup_audio)
+            if followup_text:
+                # Clean any accidental repetition of wake phrase
+                clean_directive = WAKE_REGEX.sub('', followup_text).strip() or followup_text.strip()
+                app_logger.info(f"[WakeWord] Follow-up directive heard: '{clean_directive}'")
+                if self.on_directive_ready:
+                    self.on_directive_ready(clean_directive)
+        except sr.WaitTimeoutError:
+            app_logger.info("[WakeWord] Follow-up timed out without speech.")
+            if self.on_listening_state:
+                try:
+                    self.on_listening_state("idle")
+                except Exception:
+                    pass
+        except Exception as e:
+            app_logger.debug(f"[WakeWord] Follow-up capture error: {e}")
+
+    def start(self):
+        """Starts the background wake word listener."""
+        if self.is_running:
+            return
+        self._stop_event.clear()
+        self.is_running = True
+        self._thread = threading.Thread(target=self._listen_loop, daemon=True, name="AdaWakeWordDaemon")
+        self._thread.start()
+        app_logger.info("[WakeWord] Service started.")
+
+    def stop(self):
+        """Stops the background wake word listener."""
+        if not self.is_running:
+            return
+        self._stop_event.set()
+        self.is_running = False
+        if self._thread:
+            self._thread.join(timeout=2.0)
+            self._thread = None
+        app_logger.info("[WakeWord] Service stopped.")
+
+    def status(self) -> dict:
+        return {
+            "running": self.is_running,
+            "speaking": self.is_speaking,
+            "energy_threshold": getattr(self.recognizer, "energy_threshold", 0)
+        }

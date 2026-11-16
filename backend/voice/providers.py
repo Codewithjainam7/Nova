@@ -2,8 +2,15 @@ import asyncio
 import os
 from typing import AsyncGenerator
 from backend.core.logger import app_logger
-from faster_whisper import WhisperModel
-import edge_tts
+try:
+    from faster_whisper import WhisperModel
+except ImportError:
+    WhisperModel = None
+
+try:
+    import edge_tts
+except ImportError:
+    edge_tts = None
 import numpy as np
 
 class SpeechRecognizer:
@@ -68,46 +75,75 @@ class SpeechRecognizer:
                 buffer = b""
             
 class SpeechSynthesizer:
-    """Abstracts TTS provider logic using Cartesia."""
-    def __init__(self, provider_name: str = "cartesia", voice: str = "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"):
+    """
+    ADA V2 Studio Neural Voice Synthesizer
+    Integrates high-definition neural voice synthesis matching the Ada V2 voice pack (nazirlouis/ada_v2).
+    Default: 'en-GB-SoniaNeural' (ADA's signature British studio persona).
+    """
+    def __init__(self, provider_name: str = "edge_tts", voice: str = "en-GB-SoniaNeural"):
         self.provider = provider_name
-        self.voice = voice
+        # Allow override via environment variable ADA_VOICE
+        self.voice = os.getenv("ADA_VOICE", voice)
         
-        # Load API key directly from environment
+        # Optional Cartesia fallback if user provides CARTESIA_API_KEY
+        self.cartesia_client = None
         api_key = os.environ.get("CARTESIA_API_KEY", "")
-        if not api_key:
-            app_logger.warning("CARTESIA_API_KEY is not set. TTS may fail.")
-            
-        from cartesia import AsyncCartesia
-        self.client = AsyncCartesia(api_key=api_key)
+        if api_key:
+            try:
+                from cartesia import AsyncCartesia
+                self.cartesia_client = AsyncCartesia(api_key=api_key)
+            except ImportError:
+                pass
 
     async def synthesize(self, text: str) -> bytes:
-        app_logger.debug(f"[{self.provider}] Synthesizing speech for: {text[:20]}...")
-        audio_data = b""
-        async for chunk in await self.client.tts.sse(
-            model_id="sonic-english",
-            transcript=text,
-            voice_id=self.voice,
-            stream=True,
-            output_format={
-                "container": "raw",
-                "encoding": "pcm_f32le",
-                "sample_rate": 24000,
-            },
-        ):
-            audio_data += chunk["audio"]
-        return audio_data
+        clean_text = text.replace("*", "").replace("#", "").replace("`", "").strip()
+        app_logger.info(f"[SpeechSynthesizer] Synthesizing speech with voice '{self.voice}': {clean_text[:40]}...")
+        
+        # 1. Primary: High-Definition Edge Neural Voice (ADA V2 Voice Pack)
+        try:
+            import edge_tts
+            communicate = edge_tts.Communicate(clean_text, self.voice)
+            audio_chunks = []
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    audio_chunks.append(chunk["data"])
+            if audio_chunks:
+                return b"".join(audio_chunks)
+        except Exception as ee:
+            app_logger.warning(f"[SpeechSynthesizer] EdgeTTS notice: {ee}")
+
+        # 2. Fallback: Cartesia if configured
+        if self.cartesia_client:
+            try:
+                audio_data = b""
+                async for chunk in await self.cartesia_client.tts.sse(
+                    model_id="sonic-english",
+                    transcript=clean_text,
+                    voice_id=os.getenv("CARTESIA_VOICE_ID", "9626c31c-bec5-4cca-baa8-f8ba9e84c8bc"),
+                    stream=True,
+                    output_format={"container": "raw", "encoding": "pcm_f32le", "sample_rate": 24000}
+                ):
+                    audio_data += chunk["audio"]
+                return audio_data
+            except Exception as ce:
+                app_logger.warning(f"[SpeechSynthesizer] Cartesia error: {ce}")
+
+        # Fallback if EdgeTTS fails: return empty bytes (never use robotic system voice)
+        return b""
 
     async def synthesize_stream(self, text: str):
-        async for chunk in await self.client.tts.sse(
-            model_id="sonic-english",
-            transcript=text,
-            voice_id=self.voice,
-            stream=True,
-            output_format={
-                "container": "raw",
-                "encoding": "pcm_f32le",
-                "sample_rate": 24000,
-            },
-        ):
-            yield chunk["audio"]
+        clean_text = text.replace("*", "").replace("#", "").replace("`", "").strip()
+        try:
+            import edge_tts
+            communicate = edge_tts.Communicate(clean_text, self.voice)
+            async for chunk in communicate.stream():
+                if chunk["type"] == "audio":
+                    yield chunk["data"]
+            return
+        except Exception as e:
+            app_logger.warning(f"[SpeechSynthesizer] Stream fallback notice: {e}")
+
+        # Non-streaming fallback
+        full_audio = await self.synthesize(text)
+        if full_audio:
+            yield full_audio

@@ -17,6 +17,16 @@ try:
 except ImportError:
     app_logger.warning("Windows automation libraries not found. Desktop Engine will fail.")
 
+def _ensure_desktop():
+    try:
+        import ctypes
+        user32 = ctypes.windll.user32
+        h_default = user32.OpenDesktopW("Default", 0, False, 0x01FF)
+        if h_default:
+            user32.SetThreadDesktop(h_default)
+    except Exception:
+        pass
+
 class WindowsApplicationManager:
     async def execute(self, action: DesktopAction) -> Any:
         app_name_or_path = action.payload.get("path") or action.payload.get("name")
@@ -25,23 +35,24 @@ class WindowsApplicationManager:
                 raise ValueError("App path or name required for APP_LAUNCH")
             
             def _launch():
+                _ensure_desktop()
                 # Map common names to Windows executables
                 app_map = {
-                    "calculator": "calc",
-                    "notepad": "notepad",
-                    "paint": "mspaint",
-                    "wordpad": "write",
-                    "explorer": "explorer",
-                    "browser": "msedge",
+                    "calculator": "calculator:",
+                    "notepad": "notepad.exe",
+                    "paint": "mspaint.exe",
+                    "wordpad": "write.exe",
+                    "explorer": "explorer.exe",
+                    "browser": "msedge.exe",
                     "spotify": "spotify:",
                     "settings": "ms-settings:",
-                    "task manager": "taskmgr",
+                    "task manager": "taskmgr.exe",
                     "recycle bin": "shell:RecycleBinFolder",
                     "whatsapp": "whatsapp:",
-                    "brave": "brave",
-                    "chrome": "chrome",
-                    "edge": "msedge",
-                    "firefox": "firefox"
+                    "brave": "brave.exe",
+                    "chrome": "chrome.exe",
+                    "edge": "msedge.exe",
+                    "firefox": "firefox.exe"
                 }
                 exe_name = app_name_or_path
                 for key, mapped_name in app_map.items():
@@ -51,16 +62,91 @@ class WindowsApplicationManager:
                 
                 app_logger.info(f"WindowsApplicationManager: app_name_or_path={app_name_or_path}, mapped to exe_name={exe_name}")
 
-                # We use subprocess/os.startfile or pywinauto
-                # os.startfile is non-blocking and works well for generic paths
+                # Handle URL navigation with browser
+                url = action.payload.get("url")
+                if not url and action.payload.get("entity") and "http" in str(action.payload.get("entity")):
+                    url = action.payload.get("entity")
+
+                def _focus_window(title_substr: str):
+                    try:
+                        _ensure_desktop()
+                        import win32gui, win32con, time
+                        time.sleep(1.5)
+                        def cb(hwnd, _):
+                            if win32gui.IsWindowVisible(hwnd):
+                                t = win32gui.GetWindowText(hwnd)
+                                if title_substr.lower() in t.lower():
+                                    win32gui.ShowWindow(hwnd, win32con.SW_RESTORE)
+                                    try:
+                                        win32gui.SetForegroundWindow(hwnd)
+                                    except Exception:
+                                        pass
+                        win32gui.EnumWindows(cb, None)
+                    except Exception as e:
+                        app_logger.warning(f"Failed to focus window {title_substr}: {e}")
+
+                if url:
+                    # 1. If browser window is already open, focus it and open a new tab directly
+                    try:
+                        _ensure_desktop()
+                        import win32gui, win32con, time, pyautogui, pyperclip
+                        matched_hwnd = None
+                        target_kw = "brave" if "brave" in app_name_or_path.lower() else "chrome" if "chrome" in app_name_or_path.lower() else "edge" if "edge" in app_name_or_path.lower() else ""
+                        def find_cb(h, _):
+                            nonlocal matched_hwnd
+                            if win32gui.IsWindowVisible(h):
+                                title = win32gui.GetWindowText(h).lower()
+                                if target_kw and target_kw in title:
+                                    matched_hwnd = h
+                        win32gui.EnumWindows(find_cb, None)
+                        if matched_hwnd:
+                            app_logger.info(f"Existing browser window found ({hex(matched_hwnd)}). Opening new tab with {url}")
+                            win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
+                            win32gui.SetForegroundWindow(matched_hwnd)
+                            time.sleep(0.3)
+                            pyautogui.hotkey('ctrl', 't')
+                            time.sleep(0.3)
+                            pyperclip.copy(url)
+                            pyautogui.hotkey('ctrl', 'v')
+                            time.sleep(0.1)
+                            pyautogui.press('enter')
+                            return
+                    except Exception as e:
+                        app_logger.warning(f"Active browser tab injection failed: {e}")
+
+                    # 2. Cold launch if no existing window
+                    if "brave" in app_name_or_path.lower():
+                        brave_candidates = [
+                            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+                            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+                            os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe")
+                        ]
+                        for bp in brave_candidates:
+                            if os.path.exists(bp):
+                                import subprocess
+                                app_logger.info(f"Launching Brave directly with URL: {url}")
+                                subprocess.Popen([bp, url])
+                                _focus_window("Brave")
+                                return
+                    try:
+                        app_logger.info(f"Opening URL via default browser: {url}")
+                        os.startfile(url)
+                        _focus_window(app_name_or_path or "browser")
+                        return
+                    except Exception as e:
+                        app_logger.warning(f"os.startfile({url}) failed: {e}")
+
+                # Standard app launch
                 try:
                     app_logger.info(f"Trying os.startfile({exe_name})")
                     os.startfile(exe_name)
                     app_logger.info("os.startfile succeeded")
+                    _focus_window(app_name_or_path)
                 except Exception as e:
                     app_logger.warning(f"os.startfile failed: {e}. Falling back to pywinauto.")
                     # fallback to pywinauto if it's an exe that needs hooking
                     pywinauto.Application(backend="uia").start(exe_name)
+                    _focus_window(app_name_or_path)
             
             await asyncio.to_thread(_launch)
             # Give the app time to open and focus before subsequent actions (like typing)
@@ -279,6 +365,8 @@ class WindowsIntentManager:
                 return self.router.execute(app_name, intent, entity)
                 
             success = await asyncio.to_thread(_execute_intent)
+            if success and self.router.last_output:
+                action.payload["output"] = self.router.last_output
             if not success:
                 app_logger.error(f"Intent {intent} for {app_name} failed to execute.")
             return success

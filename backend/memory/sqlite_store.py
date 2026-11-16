@@ -1,5 +1,7 @@
 import sqlite3
 import json
+import os
+from pathlib import Path
 from typing import List, Optional
 from datetime import datetime
 from backend.memory.schema import MemoryItem, MemoryType
@@ -8,7 +10,12 @@ from backend.core.logger import app_logger
 
 class SQLiteStore:
     def __init__(self, db_path: str = "nova_memory.db"):
-        self.db_path = db_path
+        if not os.path.isabs(db_path):
+            root_dir = Path(__file__).resolve().parent.parent.parent
+            self.db_path = str(root_dir / db_path)
+        else:
+            self.db_path = db_path
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         self._init_db()
 
     def _init_db(self):

@@ -1,6 +1,8 @@
 import sqlite3
 import json
 import time
+import os
+from pathlib import Path
 from typing import Dict, Any, Optional
 from backend.core.logger import app_logger
 from backend.services.api_registry import get_integration, AuthMethod, ExecutionEngine
@@ -10,7 +12,12 @@ class APIManager:
     Central manager for API integrations. Handles credentials, OAuth, rate limiting, and unified execution.
     """
     def __init__(self, db_path: str = "nova_api_manager.db"):
-        self.db_path = db_path
+        if not os.path.isabs(db_path):
+            root_dir = Path(__file__).resolve().parent.parent.parent
+            self.db_path = str(root_dir / db_path)
+        else:
+            self.db_path = db_path
+        os.makedirs(os.path.dirname(self.db_path), exist_ok=True)
         from backend.services.credentials import CredentialsManager
         self.cred_manager = CredentialsManager()
         self._init_db()

@@ -10,7 +10,7 @@ from backend.core.logger import app_logger
 class KernelLogger:
     @staticmethod
     def log_lifecycle(event: str):
-        app_logger.info(f"[NOVA KERNEL] {event}")
+        app_logger.info(f"[ADA KERNEL] {event}")
 
 class NovaKernel:
     """

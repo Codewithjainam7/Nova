@@ -18,7 +18,7 @@ class RiskLevel(str, Enum):
 
 class Intent(BaseModel):
     primary_intent: IntentType
-    confidence: float = Field(..., ge=0.0, le=1.0)
+    confidence: float = Field(0.9, ge=0.0, le=1.0)
     raw_query: str
 
 class Goal(BaseModel):

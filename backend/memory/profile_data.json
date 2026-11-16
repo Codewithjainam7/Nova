@@ -1,0 +1,50 @@
+{
+  "user": {
+    "name": "Jainam",
+    "preferred_salutation": "Boss",
+    "career_focus": "AI/ML Engineering, Autonomous Systems",
+    "active_project": "NOVA AI (ADA - Autonomous Digital Assistant)",
+    "preferred_messaging_platform": "whatsapp"
+  },
+  "contacts": {
+    "manav": {
+      "name": "Manav",
+      "alias": "Vedya (WhatsApp only)",
+      "platforms": {
+        "whatsapp": "Vedya",
+        "instagram": "Manav",
+        "telegram": "Manav",
+        "default": "Manav"
+      },
+      "notes": "Close friend. Saved as Vedya strictly on WhatsApp. On Instagram and all other platforms his name is Manav."
+    },
+    "nandini": {
+      "name": "Nandini",
+      "alias": "Nandini",
+      "platforms": {
+        "instagram": "Nandini",
+        "whatsapp": "Nandini",
+        "default": "Nandini"
+      },
+      "notes": "Saved as Nandini on both Instagram and WhatsApp."
+    },
+    "jagrat": {
+      "name": "Jagrat",
+      "alias": "Jagrat",
+      "platforms": {
+        "default": "Jagrat"
+      },
+      "notes": "Friend from college."
+    }
+  },
+  "rules": [
+    "Always default to WhatsApp if no platform is mentioned for messaging.",
+    "Never attempt to launch mobile apps (Instagram, WhatsApp, Telegram) as Windows desktop processes.",
+    "Maintain a natural, warm, human-nuanced tone with proper capitalization and punctuation."
+  ],
+  "preferences": {
+    "browser": "Brave",
+    "communication_tone": "Warm, witty, articulate, human-like.",
+    "phone_connection": "192.168.0.101:5555 (Wireless ADB)"
+  }
+}

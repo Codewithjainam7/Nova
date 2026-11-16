@@ -1,6 +1,8 @@
 import React, { useState, useCallback } from 'react';
-import { Mic, MicOff, Keyboard } from 'lucide-react';
-import { motion, AnimatePresence } from 'framer-motion';
+import { Mic, MicOff, ArrowUp, Sliders, Zap, FolderSync, MessageSquare, Smartphone, Globe, Sparkles } from 'lucide-react';
+import { useWidgetStore } from '../../store/useWidgetStore';
+import clsx from 'clsx';
+import { motion } from 'framer-motion';
 
 interface VoiceControllerProps {
   isListening: boolean;
@@ -15,92 +17,144 @@ export const VoiceController: React.FC<VoiceControllerProps> = ({
   onSendText,
   isProcessing 
 }) => {
-  const [showTextInput, setShowTextInput] = useState(false);
   const [textInput, setTextInput] = useState('');
+  const { customDirectives, setCustomizerOpen, isCustomizerOpen } = useWidgetStore();
 
-  const handleTextSend = useCallback(() => {
-    if (textInput.trim()) {
-      onSendText(textInput.trim());
+  const handleSend = useCallback((text?: string) => {
+    const query = (text !== undefined ? text : textInput).trim();
+    if (query) {
+      onSendText(query);
       setTextInput('');
-      setShowTextInput(false);
     }
   }, [textInput, onSendText]);
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleTextSend();
-    }
-    if (e.key === 'Escape') {
-      setShowTextInput(false);
+      handleSend();
     }
   };
 
+  const getDirectiveIcon = (label: string) => {
+    const l = label.toLowerCase();
+    if (l.includes('brief') || l.includes('morning')) return <Zap className="w-4 h-4 text-amber-400 shrink-0" />;
+    if (l.includes('organize') || l.includes('file')) return <FolderSync className="w-4 h-4 text-cyan-400 shrink-0" />;
+    if (l.includes('msg') || l.includes('message') || l.includes('whatsapp')) return <MessageSquare className="w-4 h-4 text-emerald-400 shrink-0" />;
+    if (l.includes('phone') || l.includes('battery')) return <Smartphone className="w-4 h-4 text-indigo-400 shrink-0" />;
+    if (l.includes('research') || l.includes('web') || l.includes('search')) return <Globe className="w-4 h-4 text-purple-400 shrink-0" />;
+    return <Sparkles className="w-4 h-4 text-cyan-400 shrink-0" />;
+  };
+
+  if (isCustomizerOpen) return null;
+
   return (
-    <div className="absolute bottom-8 left-1/2 -translate-x-1/2 z-20 flex flex-col items-center gap-4">
-      {/* Text input toggle */}
-      <AnimatePresence>
-        {showTextInput && (
-          <motion.div
-            initial={{ opacity: 0, y: 20, scale: 0.95 }}
-            animate={{ opacity: 1, y: 0, scale: 1 }}
-            exit={{ opacity: 0, y: 20, scale: 0.95 }}
-            className="flex items-center gap-2 bg-black/50 backdrop-blur-xl border border-white/10 rounded-2xl p-2 w-[500px]"
+    <div className="absolute bottom-2 sm:bottom-4 left-1/2 -translate-x-1/2 z-30 flex flex-col items-center gap-1.5 sm:gap-2 w-[95vw] sm:w-[92vw] max-w-lg md:max-w-xl lg:max-w-2xl px-1 sm:px-2 pointer-events-none select-none">
+      
+      {/* Quick Action Jarvis Directives (Never clips, responsive wrap, zero emojis) */}
+      <div className="flex flex-wrap items-center justify-center gap-1.5 sm:gap-2 pointer-events-auto w-full px-1 py-0.5 no-scrollbar">
+        {customDirectives.map((d) => (
+          <button
+            key={d.id}
+            onClick={() => {
+              if (d.cmd.endsWith(' ')) {
+                setTextInput(d.cmd);
+              } else {
+                handleSend(d.cmd);
+              }
+            }}
+            className={clsx(
+              "px-3 py-1.5 rounded-xl text-xs font-hud font-bold tracking-wider border transition-all flex items-center gap-1.5 shrink-0 backdrop-blur-xl shadow-md cursor-pointer",
+              d.color,
+              "hover:scale-105 hover:brightness-125 active:scale-95"
+            )}
           >
-            <input
-              autoFocus
-              value={textInput}
-              onChange={(e) => setTextInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="Type a message..."
-              className="flex-1 bg-transparent text-white placeholder-white/30 outline-none px-4 py-2.5 text-sm"
-            />
-            <button 
-              onClick={handleTextSend}
-              className="px-5 py-2.5 bg-blue-500 hover:bg-blue-600 text-white rounded-xl text-sm font-medium transition-colors"
-            >
-              Send
-            </button>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            {getDirectiveIcon(d.label)}
+            <span>{d.label}</span>
+          </button>
+        ))}
 
-      <div className="flex items-center gap-4">
-        {/* Keyboard toggle */}
+        {/* Quick Customize Button */}
         <button
-          onClick={() => setShowTextInput(!showTextInput)}
-          className="p-3 rounded-full bg-white/5 hover:bg-white/10 border border-white/10 text-white/50 hover:text-white transition-all"
+          onClick={() => setCustomizerOpen(true)}
+          title="Customize Directives & Widgets"
+          className="px-3 py-1.5 rounded-xl text-xs font-hud font-bold text-cyan-200 hover:text-white border border-cyan-400/50 hover:border-cyan-300 bg-cyan-950/60 hover:bg-cyan-500/25 transition-all flex items-center gap-1.5 shrink-0 shadow-[0_0_15px_rgba(6,182,212,0.2)] cursor-pointer active:scale-95"
         >
-          <Keyboard className="w-5 h-5" />
+          <Sliders className="w-3.5 h-3.5 text-cyan-300" />
+          <span>MORE</span>
         </button>
+      </div>
 
-        {/* Main mic button */}
+      {/* Main Holographic Command Bar */}
+      <div className="w-full flex items-center gap-3 bg-[#030713]/95 border-2 border-cyan-400/50 backdrop-blur-2xl rounded-2xl p-2.5 shadow-[0_0_45px_rgba(6,182,212,0.25),inset_0_0_20px_rgba(6,182,212,0.08)] pointer-events-auto">
+        
+        {/* Glowing Neural Mic Trigger */}
         <button
           onClick={onToggleListening}
           disabled={isProcessing}
-          className={`relative p-6 rounded-full transition-all duration-300 disabled:opacity-50 ${
+          title={isListening ? "Stop Listening" : "Start Voice Input"}
+          className={clsx(
+            "relative p-3 rounded-xl transition-all duration-300 shrink-0 cursor-pointer flex items-center justify-center",
             isListening 
-              ? 'bg-cyan-500/20 border-2 border-cyan-400 text-cyan-400 shadow-lg shadow-cyan-500/20' 
-              : 'bg-white/5 border-2 border-white/20 text-white/70 hover:border-white/40 hover:text-white'
-          }`}
-        >
-          {/* Pulsing ring when listening */}
-          {isListening && (
-            <>
-              <span className="absolute inset-0 rounded-full border-2 border-cyan-400 animate-ping opacity-20" />
-              <span className="absolute inset-[-8px] rounded-full border border-cyan-400/30 animate-pulse" />
-            </>
+              ? "bg-gradient-to-r from-cyan-400 to-cyan-500 text-black shadow-[0_0_30px_#06b6d4] scale-105" 
+              : "bg-white/[0.08] text-white hover:text-cyan-200 hover:bg-white/15 border border-white/15 hover:border-cyan-400/60 shadow-inner"
           )}
-          {isListening ? <MicOff className="w-7 h-7 relative z-10" /> : <Mic className="w-7 h-7" />}
+        >
+          {isListening ? (
+            <>
+              {/* Expanding Concentric Sonar Rings */}
+              <motion.span 
+                animate={{ scale: [1, 1.8], opacity: [0.8, 0] }}
+                transition={{ repeat: Infinity, duration: 1.2, ease: "easeOut" }}
+                className="absolute inset-0 rounded-xl border-2 border-cyan-300 pointer-events-none" 
+              />
+              <MicOff className="w-5 h-5 relative z-10" />
+            </>
+          ) : (
+            <Mic className="w-5 h-5 text-cyan-300" />
+          )}
         </button>
 
-        {/* Status text */}
-        <div className="w-24">
-          <p className={`text-xs font-medium tracking-wide ${isListening ? 'text-cyan-400' : isProcessing ? 'text-purple-400' : 'text-white/30'}`}>
-            {isListening ? 'Listening...' : isProcessing ? 'Thinking...' : 'Tap to talk'}
-          </p>
+        {/* Input Text Area */}
+        <div className="flex-1 relative">
+          <input
+            value={textInput}
+            onChange={(e) => setTextInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            placeholder={isListening ? "Listening to your voice directive..." : "Type directive or press Mic for Voice..."}
+            className={clsx(
+              "w-full bg-transparent text-white placeholder-white/50 outline-none px-2 text-sm font-sans tracking-wide font-normal",
+              isListening && "animate-pulse text-cyan-300 placeholder-cyan-400/80"
+            )}
+          />
         </div>
+
+        {/* Submit Arrow Button */}
+        <button
+          onClick={() => handleSend()}
+          disabled={!textInput.trim() || isProcessing}
+          className={clsx(
+            "p-3 rounded-xl transition-all duration-200 shrink-0 flex items-center justify-center cursor-pointer",
+            textInput.trim()
+              ? "bg-gradient-to-r from-cyan-400 to-blue-500 text-black hover:brightness-110 shadow-[0_0_25px_#06b6d4] scale-100 active:scale-95"
+              : "bg-white/[0.05] text-white/30 cursor-not-allowed scale-95"
+          )}
+        >
+          <ArrowUp className="w-5 h-5 stroke-[2.5]" />
+        </button>
       </div>
+
+      {/* Micro Status Hint Line */}
+      <div className="flex items-center justify-between w-full px-3 text-[11px] font-hud text-cyan-300 font-bold tracking-[0.16em]">
+        <span className="flex items-center gap-1.5">
+          <span className="px-2 py-0.5 rounded bg-cyan-950 border border-cyan-400/50 text-cyan-200 text-[10px] font-mono">ALT+SPACE / F2</span>
+          <span>DYNAMIC ISLAND</span>
+        </span>
+        <span className="flex items-center gap-2">
+          <span className="w-2 h-2 rounded-full bg-cyan-400 animate-pulse" />
+          <span>ADA MARK VII COGNITIVE ARCHITECTURE // NEURAL READY</span>
+        </span>
+      </div>
+
     </div>
   );
 };

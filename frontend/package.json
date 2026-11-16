@@ -2,12 +2,15 @@
   "name": "frontend-tmp",
   "private": true,
   "version": "0.0.0",
+  "main": "electron/main.cjs",
   "type": "module",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "electron": "electron electron/main.cjs",
+    "desktop": "electron electron/main.cjs"
   },
   "dependencies": {
     "@mediapipe/tasks-vision": "^0.10.35",
@@ -38,6 +41,7 @@
     "@types/react-dom": "^19.2.3",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@vitejs/plugin-react": "^6.0.3",
+    "electron": "^45.3.2",
     "oxlint": "^1.71.0",
     "typescript": "~6.0.2",
     "vite": "^8.1.1"

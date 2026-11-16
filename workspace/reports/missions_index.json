@@ -1,0 +1,42 @@
+[
+  {
+    "mission_id": "b5d31946",
+    "title": "run an overnight research mission on AI",
+    "query": "run an overnight research mission on AI cognitive architectures",
+    "status": "COMPLETED",
+    "started_at": "2026-11-16T05:00:32.982544",
+    "completed_at": "2026-11-16T05:00:39.755897",
+    "report_file": "D:\\ANTIGRAVITY PROJECTS\\Transfer_To_New_Laptop\\NOVA_AI\\workspace\\reports\\mission_run_an_overnight_research_mission_on_AI_2026-11-16_05-00-32.md",
+    "summary": "Completed an overnight deep\u2011dive into AI cognitive architectures, delivering a comprehensive report that surveys current models,"
+  },
+  {
+    "mission_id": "d0bf2bde",
+    "title": "send msg to devisri from your side telli",
+    "query": "send msg to devisri from your side telling that my boss is upgrading me thats why he is doing late night work and sacreficing his sleep",
+    "status": "COMPLETED",
+    "started_at": "2026-11-16T04:51:50.441890",
+    "completed_at": "2026-11-16T04:51:52.813031",
+    "report_file": "D:\\ANTIGRAVITY PROJECTS\\Transfer_To_New_Laptop\\NOVA_AI\\workspace\\reports\\mission_send_msg_to_devisri_from_your_side_telli_2026-11-16_04-51-50.md",
+    "summary": "Sent a concise message to Devisri on your behalf, informing her that"
+  },
+  {
+    "mission_id": "f00cb72a",
+    "title": "While I am asleep research top 3 AIML",
+    "query": "While I am asleep, research top 3 AI/ML engineer roles, key technical interview focus areas, and formulate an actionable project architecture for my portfolio.",
+    "status": "COMPLETED",
+    "started_at": "2026-11-15T23:34:56.658037",
+    "completed_at": "2026-11-15T23:35:05.152463",
+    "report_file": "D:\\ANTIGRAVITY PROJECTS\\Transfer_To_New_Laptop\\NOVA_AI\\workspace\\reports\\mission_While_I_am_asleep_research_top_3_AIML_2026-11-15_23-34-56.md",
+    "summary": ""
+  },
+  {
+    "mission_id": "56766c17",
+    "title": "While I am asleep research top 3 AIML",
+    "query": "While I am asleep, research top 3 AI/ML engineer roles, key technical interview focus areas, and formulate an actionable project architecture for my portfolio.",
+    "status": "RUNNING",
+    "started_at": "2026-11-15T23:32:24.470751",
+    "completed_at": null,
+    "report_file": "D:\\ANTIGRAVITY PROJECTS\\Transfer_To_New_Laptop\\NOVA_AI\\workspace\\reports\\mission_While_I_am_asleep_research_top_3_AIML_2026-11-15_23-32-24.md",
+    "summary": "Mission in progress..."
+  }
+]

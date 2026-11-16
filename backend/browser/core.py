@@ -1,6 +1,6 @@
 import time
 from typing import Optional
-from backend.browser.schema import BrowserSession, BrowserAction, BrowserPermissionLevel, BrowserMetrics
+from backend.browser.schema import BrowserSession, BrowserAction, BrowserPermissionLevel, BrowserMetrics, BrowserActionType
 from backend.browser.adapters import (
     BrowserLauncher, TabManager, NavigationManager, DOMManager, NetworkMonitor,
     DownloadManager, UploadManager, ScreenshotManager, PDFExporter,
@@ -138,3 +138,48 @@ class BrowserEngine:
     async def perform_action(self, action: BrowserAction):
         """Public API to request a browser action."""
         await self.executor.execute(action)
+
+    async def launch(self) -> bool:
+        action = BrowserAction(action_type=BrowserActionType.LAUNCH)
+        await self.perform_action(action)
+        return True
+
+    async def navigate(self, url: str) -> bool:
+        action = BrowserAction(action_type=BrowserActionType.NAVIGATE, payload={"url": url})
+        await self.perform_action(action)
+        return True
+
+    async def search(self, query: str) -> str:
+        action = BrowserAction(action_type=BrowserActionType.NAVIGATE, payload={"query": query})
+        await self.perform_action(action)
+        return action.payload.get("output", "")
+
+    async def click(self, selector: str) -> bool:
+        action = BrowserAction(action_type=BrowserActionType.CLICK, payload={"selector": selector})
+        await self.perform_action(action)
+        return True
+
+    async def type_text(self, selector: str, text: str) -> bool:
+        action = BrowserAction(action_type=BrowserActionType.TYPE, payload={"selector": selector, "text": text})
+        await self.perform_action(action)
+        return True
+
+    async def fill(self, selector: str, text: str) -> bool:
+        action = BrowserAction(action_type=BrowserActionType.FILL, payload={"selector": selector, "text": text})
+        await self.perform_action(action)
+        return True
+
+    async def extract_text(self, selector: str = "") -> str:
+        action = BrowserAction(action_type=BrowserActionType.EXTRACT_TEXT, payload={"selector": selector})
+        await self.perform_action(action)
+        return action.payload.get("output", "")
+
+    async def screenshot(self, path: str = "browser_screenshot.png") -> bool:
+        action = BrowserAction(action_type=BrowserActionType.SCREENSHOT, payload={"path": path})
+        await self.perform_action(action)
+        return True
+
+    async def close(self) -> bool:
+        action = BrowserAction(action_type=BrowserActionType.CLOSE)
+        await self.perform_action(action)
+        return True

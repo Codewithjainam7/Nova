@@ -1,0 +1,38 @@
+{
+  "sessions": [
+    {
+      "timestamp": "2026-11-16T03:36:23.271148",
+      "hour": 3,
+      "action": "search the web about the nvidi"
+    },
+    {
+      "timestamp": "2026-11-16T03:42:09.609916",
+      "hour": 3,
+      "action": "search the web for gta vi laun"
+    },
+    {
+      "timestamp": "2026-11-16T15:49:16.836956",
+      "hour": 15,
+      "action": "search the web for about dooms"
+    },
+    {
+      "timestamp": "2026-11-16T16:58:18.184121",
+      "hour": 16,
+      "action": "Ada, Ada Ada, Ada"
+    }
+  ],
+  "frequent_apps": {
+    "whatsapp": 5,
+    "brave": 3,
+    "vscode": 2
+  },
+  "frequent_contacts": {
+    "Vedya": 4,
+    "Nandini": 2
+  },
+  "habits": [
+    "Prefers late-night sessions between 22:00 and 02:00.",
+    "Primary communication tool is WhatsApp on wireless Android device.",
+    "Developer workflow centered around Python, AI/ML, and Vite/React frontend."
+  ]
+}

@@ -83,3 +83,6 @@ results.txt
 platform-tools/
 platform-tools.zip
 settings.json
+
+# Sensitive scratch scripts
+test_whatsapp_devisri.py

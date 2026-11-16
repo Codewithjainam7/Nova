@@ -1,10 +1,10 @@
 import json
 import uuid
 import re
-from typing import Optional
+from typing import Optional, List
 from backend.planner.schema import Plan, Intent, Goal, Task, IntentType, RiskLevel
 from backend.providers.core import AIProviderManager
-from backend.providers.schema import GenerationRequest, Message, Role, ProviderType
+from backend.providers.schema import GenerationRequest, Message, Role, ProviderType, CognitiveDomain
 from backend.core.logger import app_logger
 
 class PlannerCore:
@@ -18,6 +18,16 @@ class PlannerCore:
     async def generate_plan(self, query: str, context: str = "") -> Plan:
         app_logger.info(f"Generating real plan for query: {query}")
         
+        # 0. Fast-path local rule-based intent matching for instantaneous latency & resilience
+        heuristic = self._heuristic_plan(query)
+        if heuristic:
+            if heuristic.tasks:
+                await self._refine_communication_tasks(heuristic.tasks, query)
+                app_logger.info(f"Fast-path heuristic planner matched: {heuristic.tasks[0].description}")
+            else:
+                app_logger.info(f"Fast-path conversational planner matched (0 automation tasks).")
+            return heuristic
+        
         system_prompt = f"""You are the central Planning Engine for ADA, an elite Jarvis-style autonomous AI Operating System.
 Your job is to take a user's natural language request and break it down into a structured JSON execution plan.
 You are a backend JSON formatting engine. You are NOT a conversational assistant. 
@@ -27,12 +37,35 @@ Your ONLY job is to output the JSON plan that routes the user's intent to the co
 The agent has these available tools/subsystems: ["browser", "desktop", "vision", "voice", "memory", "search", "device", "background_search"].
 
 IMPORTANT RULES:
-1. If the user asks to perform an action in a LOCAL desktop application (e.g. Settings, Calculator, Notepad, Spotify, VS Code, File Explorer), use "desktop" in required_tools with desktop_action "APP_INTENT_EXECUTE". Provide "app", "intent", and "entity".
-2. MUSIC & SPOTIFY ON PC: If the user asks to play a song/artist/playlist on Spotify on their computer (e.g. 'play sunflower on spotify'), use "desktop" in required_tools with desktop_action "APP_INTENT_EXECUTE", app "spotify", intent "play_media", and provide the song/artist query in "entity".
-3. If the user asks to do something on a WEBSITE or open web services (e.g. Gmail, YouTube, Google), use "browser" in required_tools with browser_action "NAVIGATE" and provide the url in action_metadata.
-4. CRITICAL: If the user is just saying hello, asking a general question, or chatting conversationally, DO NOT OUTPUT ANY DESKTOP OR BROWSER TASKS. Set tasks to an empty array [].
-5. If the user asks to search for news, maps, or background information to be displayed on screen, use "background_search" in required_tools and provide "query" in action_metadata. Do NOT use "browser" for this.
-6. If the user asks to interact with their phone (e.g., check battery, connect phone, pair phone, open app on phone, play a song or video on phone, send a message, transfer a file, or open/view a file/image on the phone), use "device" in required_tools. For pairing, set intent to "pair". For connecting, set intent to "connect". For battery, set intent to "get_battery". For opening an app, set intent to "open_app". For playing a song/video/media on the phone, MUST set intent to "play_media", provide the media name in "entity", and provide the target app (e.g. "youtube", "spotify") in "app" within action_metadata. For sending a message (e.g. WhatsApp, Telegram), set intent to "send_message", provide the contact name in "entity", the message body in "message", and the target app (e.g. "whatsapp", "telegram") in "app" within action_metadata. For sending/transferring a file to the phone, set intent to "transfer_file" and provide the filename in "entity" within action_metadata. For opening/viewing a file or image on the phone (like viewing a transferred file), set intent to "open_app" and provide the filename (e.g. "sign2.png") in "entity" within action_metadata. Do NOT generate browser or desktop tasks for opening files on the phone.
+1. DESKTOP APPLICATIONS & WINDOWS AUTOMATION:
+   - For Calculator: If user asks to calculate math in Calculator (e.g. 'open calculator and calculate 45 * 12', 'do 500 / 5 on calculator'), use "desktop" in required_tools with app "calculator", intent "calculate", entity "<expression>", and desktop_action "APP_INTENT_EXECUTE".
+   - For Notepad: If user asks to write or take notes in Notepad (e.g. 'open notepad and write meeting notes at 5pm'), use "desktop" in required_tools with app "notepad", intent "write_note", entity "<text>", and desktop_action "APP_INTENT_EXECUTE".
+   - For File Explorer & Folder Organization:
+     If user asks to open a folder (e.g. 'open downloads folder', 'open documents'), use "desktop" in required_tools with app "explorer", intent "open_folder", entity "<folder_name>", and desktop_action "APP_INTENT_EXECUTE".
+     If user asks to ORGANIZE, sort, or clean up a folder (e.g. 'organize my downloads', 'organize downloads folder by creating folders', 'sort my downloads', 'organize my files'): use "desktop" in required_tools with app "explorer", intent "organize_folder", entity "<folder_name>" (default "downloads"), and desktop_action "APP_INTENT_EXECUTE". NEVER just open the folder when the user specifically asks to organize it!
+   - For Windows Settings: If user asks to open settings or check updates/display/bluetooth, use "desktop" in required_tools with app "settings", intent "navigate", entity "<section_name>", and desktop_action "APP_INTENT_EXECUTE".
+   - For Spotify on PC: If user asks to play a song/artist/playlist on Spotify on PC (e.g. 'play sunflower on spotify'), use "desktop" in required_tools with app "spotify", intent "play_media", entity "<song/artist>", and desktop_action "APP_INTENT_EXECUTE".
+   - For desktop apps & browsers (e.g. Brave, Chrome, Edge, Paint, Task Manager, VS Code): use "desktop" in required_tools with app "<name>", intent "open_app" (or "close_app"), and desktop_action "APP_LAUNCH". If the user mentions opening a website, YouTube, or playing videos in a browser (e.g. 'open brave and play youtube', 'open chrome and go to reddit', 'open youtube in browser'), MUST provide "url" in action_metadata (e.g. "url": "https://www.youtube.com") and "app": "brave" (or "chrome").
+2. BROWSER AUTOMATION & WEB NAVIGATION:
+   - If user asks to SEARCH the web, lookup information on Google, or open a website in browser (e.g. 'search Google for SpaceX launch', 'search web for Nvidia stock', 'open youtube.com in browser', 'open github in browser'):
+     Use "browser" in required_tools. If searching, provide "query" and set intent to "search". If navigating to a URL, provide "url" and set intent to "navigate".
+3. CRITICAL CONVERSATIONAL GUARD: If the user is just saying hello, asking a general knowledge question to be answered in chat, or chatting conversationally, DO NOT OUTPUT ANY DESKTOP OR BROWSER TASKS. Set tasks to an empty array [].
+4. If the user asks to search for news, maps, or background information to be displayed on the Nova workspace screen, use "background_search" in required_tools and provide "query" in action_metadata.
+5. If the user asks to interact with their phone (e.g., check battery, connect phone, pair phone, open app on phone, play a song or video on phone, send a message, transfer a file, or open/view a file/image on the phone), use "device" in required_tools. For pairing, set intent to "pair". For connecting, set intent to "connect". For battery, set intent to "get_battery". For opening an app, set intent to "open_app". For playing a song/video/media on the phone, MUST set intent to "play_media", provide the media name in "entity", and provide the target app (e.g. "youtube", "spotify") in "app" within action_metadata.
+   - For sending a message (e.g. WhatsApp, Telegram, Instagram):
+     DEFAULT PLATFORM RULE: If the user does not explicitly specify a platform (e.g. 'msg manav what is he doing', 'send message to mom', 'text jagrat are you free'), ALWAYS DEFAULT THE MESSAGING PLATFORM TO "whatsapp".
+     NEVER USE "desktop" FOR MESSAGING OR MOBILE APPS: Instagram, WhatsApp, and Telegram are mobile communication apps. NEVER assign "desktop" to Instagram, WhatsApp, or Telegram. Always use "device" in required_tools.
+     COMPOUND COMMANDS: When the user asks 'open instagram and msg <contact> <text>' or 'open whatsapp and msg <contact>', output ONLY ONE task with intent "send_message" and required_tools: ["device"]. Do NOT create a separate 'Launch instagram' or 'Launch whatsapp' task, because "send_message" autonomously opens the app, navigates to the chat thread, and sends the message.
+     Set intent to "send_message", provide the contact name in "entity", the target app ("whatsapp", "telegram", "instagram") in "app", and MUST use "device" in required_tools. If the user asks to send on both WhatsApp and Instagram, output TWO separate tasks (one for whatsapp, one for instagram).
+     CRITICAL CONTACT ALIASES & NOTES:
+     If the user specifies a platform-specific alias (e.g. 'on insta her name is heera', 'saved as dad on telegram'):
+     Use that EXACT alias as the "entity" for that platform's task (e.g. for Instagram, "entity": "Heera"; for WhatsApp, "entity": "Nandini").
+     DO NOT put user notes or alias explanations into the message body!
+     CRITICAL SOCIAL INTELLIGENCE FOR "message":
+     NEVER copy verbatim raw strings like "what is he doing now are u free tomorrow" or "that he is mad".
+     NEVER leak meta-notes or private instructions (e.g. NEVER write 'Note: I have you saved as Heera').
+     Compose a natural, warm, human-nuanced message with proper English capitalization, commas, and question marks (e.g. "Hey Jagrat, what are you doing right now? Also, are you free tomorrow? Jainam wanted to check. - ADA").
+   - For sending/transferring a file to the phone, set intent to "transfer_file" and provide the filename in "entity" within action_metadata. For opening/viewing a file or image on the phone (like viewing a transferred file), set intent to "open_app" and provide the filename in "entity" within action_metadata. Do NOT generate browser or desktop tasks for opening files on the phone.
 
 User Request: {query}
 Execution Context (World State): 
@@ -74,9 +107,12 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
         for attempt in range(3):
             try:
                 req = GenerationRequest(
-                    messages=[Message(role=Role.USER, content=system_prompt)],
-                    provider_type=ProviderType.GEMINI,
-                    model="",
+                    messages=[
+                        Message(role=Role.SYSTEM, content="You are ADA's elite JSON Planning Engine. Output ONLY a valid JSON object matching the requested schema. No markdown fences, no conversational text, raw JSON only."),
+                        Message(role=Role.USER, content=system_prompt)
+                    ],
+                    cognitive_domain=CognitiveDomain.REFLEX,
+                    max_tokens=1500,
                     stream=False,
                     json_mode=True
                 )
@@ -145,6 +181,17 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
                 except ValueError:
                     overall_risk = RiskLevel.LOW
 
+                # If LLM returned empty tasks but query clearly has an actionable automation intent, run heuristic fallback
+                if not tasks:
+                    heuristic = self._heuristic_plan(query)
+                    if heuristic:
+                        app_logger.info("LLM generated 0 tasks, but heuristic planner matched actionable intent.")
+                        return heuristic
+
+                # Cognitive Message Synthesizer: Refine any communication tasks
+                if tasks:
+                    await self._refine_communication_tasks(tasks, query)
+
                 plan = Plan(
                     plan_id=str(uuid.uuid4()),
                     intent=intent,
@@ -165,8 +212,333 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
                 app_logger.warning(f"Plan generation attempt {attempt + 1}/3 failed: {str(e)}")
                 continue
         
-        app_logger.error(f"Failed to generate real plan after 3 attempts: {str(last_error)}")
+        app_logger.error(f"Failed to generate real plan after 3 attempts: {str(last_error)}. Checking heuristic planner...")
+        heuristic = self._heuristic_plan(query)
+        if heuristic:
+            return heuristic
+
         # Fallback mock plan
         intent = Intent(primary_intent=IntentType.UNKNOWN, confidence=0.0, raw_query=query)
         goal = Goal(primary_goal="Fallback execution")
         return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[])
+
+    async def _refine_communication_tasks(self, tasks: List[Task], raw_query: str):
+        """
+        Cognitive Message Synthesizer:
+        If a task involves sending a message to a contact (WhatsApp, Telegram, SMS),
+        refines the raw extracted text using Groq/Gemini so it sounds natural, nuanced,
+        warm, and socially intelligent rather than copying verbatim raw phrases like 'he is mad'.
+        """
+        for task in tasks:
+            meta = task.action_metadata
+            intent = meta.get("intent", "").lower()
+            if intent in ["send_message", "message"] or any(a in meta.get("app", "").lower() for a in ["whatsapp", "telegram", "instagram"]):
+                contact = meta.get("entity", "the recipient")
+                
+                # Resolve contact alias if mapped (e.g. Manav -> Vedya on WhatsApp, Nandini -> Heera on Instagram)
+                try:
+                    import os, json
+                    contacts_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "devices", "known_contacts.json")
+                    if os.path.exists(contacts_file):
+                        with open(contacts_file, "r", encoding="utf-8") as cf:
+                            c_data = json.load(cf)
+                            c_low = contact.lower()
+                            if c_low in c_data:
+                                app_name = meta.get("app", "whatsapp").lower()
+                                mapping = c_data[c_low]
+                                if isinstance(mapping, dict):
+                                    app_clean = app_name.lower().strip()
+                                    if app_clean in ["instagram", "insta"]:
+                                        resolved = mapping.get("instagram", contact)
+                                    elif app_clean in ["whatsapp"]:
+                                        resolved = mapping.get("whatsapp", mapping.get("default", contact))
+                                    else:
+                                        resolved = mapping.get(app_clean, mapping.get("default", contact))
+                                elif isinstance(mapping, str):
+                                    resolved = mapping
+                                else:
+                                    resolved = contact
+                                meta["entity"] = resolved
+                                contact = resolved
+                except Exception as e:
+                    app_logger.warning(f"Error resolving contact alias: {e}")
+                
+                raw_msg = meta.get("message") or meta.get("text") or meta.get("content") or ""
+                if not raw_msg or len(raw_msg.strip()) == 0:
+                    raw_msg = raw_query
+                
+                contact_cap = contact.capitalize()
+                synth_prompt = (
+                    f"You are ADA's Social Intelligence & Communication Synthesizer.\n"
+                    f"User (Jainam) instruction: \"{raw_query}\"\n"
+                    f"Recipient: \"{contact_cap}\"\n"
+                    f"Raw message hint: \"{raw_msg}\"\n\n"
+                    f"Task: Compose the exact, human-like text message to send to {contact_cap} on Jainam's behalf.\n\n"
+                    f"Guidelines & Personas:\n"
+                    f"1. Casual Check-ins / Questions (e.g. asking what they are doing, plans, availability tomorrow):\n"
+                    f"   Frame naturally, casually, and warmly with correct punctuation and capital letters:\n"
+                    f"   Example: 'Hey {contact_cap}, what are you up to right now? Also, are you free tomorrow? Jainam wanted to know. - ADA'\n"
+                    f"2. Playful Banter / Teasing (e.g. calling them mad, crazy, idiot among friends):\n"
+                    f"   Frame it with humor and warmth:\n"
+                    f"   Example: 'Hey {contact_cap}, Jainam wanted me to let you know that you have gone completely mad haha.'\n"
+                    f"3. Informative / Meeting / Updates (e.g. running late, meeting reminder):\n"
+                    f"   Frame it clearly, politely, and respectfully with proper English grammar.\n"
+                    f"4. Testing / Status messages (e.g. 'this was test msg sent on insta and whatsapp both'):\n"
+                    f"   Keep it friendly, natural, and clear, e.g.:\n"
+                    f"   'Hey {contact_cap}, this is a test message from Jainam sent on both Instagram and WhatsApp. Hope you're having a great day! - ADA'\n"
+                    f"5. CRITICAL - NEVER LEAK USER META-NOTES OR ALIASES:\n"
+                    f"   The user instruction often contains private notes to the AI (e.g. 'note in insta her name is heera', 'saved as X', 'msg accordingly', 'fast').\n"
+                    f"   NEVER include these notes, parenthetical comments, or internal explanations in the message to {contact_cap}!\n"
+                    f"6. Absolute Quality Rules:\n"
+                    f"   - ALWAYS use proper English capitalization (e.g. 'Hey {contact_cap}', 'Are you', 'Jainam').\n"
+                    f"   - ALWAYS use proper punctuation (commas, question marks, periods).\n"
+                    f"   - Keep it clean ASCII text without emojis for maximum phone compatibility.\n"
+                    f"   - Output ONLY the exact text message to be sent. No quotes, no explanations, no 'Message:' prefix, no markdown fences."
+                )
+                try:
+                    synth_req = GenerationRequest(
+                        messages=[Message(role=Role.USER, content=synth_prompt)],
+                        cognitive_domain=CognitiveDomain.SOCIAL_SYNTHESIS,
+                        temperature=0.7,
+                        max_tokens=600
+                    )
+                    synth_resp = await self.provider_manager.generate(synth_req)
+                    refined = synth_resp.content.strip().strip('"').strip("'")
+                    
+                    # Clean any accidental prefixes from LLM
+                    for prefix in ["Message:", "Text:", "Response:", "WhatsApp message:", "Draft:"]:
+                        if refined.lower().startswith(prefix.lower()):
+                            refined = refined[len(prefix):].strip()
+                            
+                    if refined and len(refined) > 3:
+                        app_logger.info(f"[Social Synthesizer] Refined message for {contact}: '{raw_msg}' -> '{refined}'")
+                        meta["message"] = refined
+                        app_name = meta.get("app", "messaging").capitalize()
+                        task.description = f"Send {app_name} message to {contact_cap}: \"{refined[:40]}...\""
+                except Exception as e:
+                    app_logger.warning(f"Social message refinement failed: {e}")
+
+    def _heuristic_plan(self, query: str) -> Optional[Plan]:
+        """Heuristic rule-based planner for instant local automation."""
+        q = query.lower().strip()
+
+        # 0. Conversational Memory & Profile Queries: Return empty tasks so pipeline synthesizes from injected profile
+        memory_queries = ["who is ", "what do you remember", "what do you know about me", "show my memory", "show memory", "my contacts", "who are my contacts", "what are my rules"]
+        if any(mq in q for mq in memory_queries):
+            intent = Intent(primary_intent=IntentType.COMMUNICATION, confidence=0.99, raw_query=query)
+            goal = Goal(primary_goal="Recall memory and answer user conversationally")
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[])
+
+        # 0.5. Folder Organization Fast-Path (organize, sort, clean downloads/documents/desktop/files/any folder)
+        if any(k in q for k in ["organize", "organise", "clean up", "tidy up"]) or (any(k in q for k in ["sort ", "clean ", "tidy "]) and any(f in q for f in ["download", "document", "desktop", "picture", "video", "file", "folder", "everything", "anything", "all", "dir", "drive"])):
+            # Check for direct drive path (e.g. C:\... or D:\...)
+            path_match = re.search(r'([a-zA-Z]:\\[^"\'\n\r<>|?*]+)', query)
+            if path_match:
+                target_folder = path_match.group(1).strip()
+            elif "desktop" in q:
+                target_folder = "desktop"
+            elif "document" in q:
+                target_folder = "documents"
+            elif "download" in q:
+                target_folder = "downloads"
+            elif "picture" in q:
+                target_folder = "pictures"
+            elif "video" in q:
+                target_folder = "videos"
+            elif "music" in q:
+                target_folder = "music"
+            else:
+                target_folder = "auto"
+
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Organize {target_folder.capitalize()} folder by creating categorized subfolders",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "explorer",
+                    "intent": "organize_folder",
+                    "entity": target_folder,
+                    "desktop_action": "APP_INTENT_EXECUTE"
+                }
+            )
+            intent = Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query)
+            goal = Goal(primary_goal=f"Organize {target_folder.capitalize()} folder")
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # 1. Open Physical Desktop Browser / Brave / Chrome / Edge / YouTube
+        # CRITICAL: ONLY launch a physical browser window if the user EXPLICITLY asks to open/launch it.
+        # General search/research queries must NEVER open physical desktop browser windows.
+        is_explicit_browser_cmd = any(q.startswith(k) or f" {k}" in q for k in [
+            "open brave", "open chrome", "open edge", "open browser",
+            "launch brave", "launch chrome", "launch edge", "launch browser",
+            "open youtube", "launch youtube", "play on youtube"
+        ]) or ("youtube" in q and any(w in q for w in ["play", "watch", "listen", "video", "song"]))
+
+        if is_explicit_browser_cmd:
+            target_app = "brave" if "brave" in q else "chrome" if "chrome" in q else "edge" if "edge" in q else "browser"
+            target_url = ""
+            if "youtube" in q:
+                # Extract specific video, channel, or song query
+                clean_q = re.sub(r'\b(open|launch|in|browser|broswer|on|laptop|pc|please|can you|play|watch|video|videos|youtube|and|the)\b', ' ', q, flags=re.IGNORECASE)
+                clean_q = re.sub(r'\b(brave|chrome|edge)\b', ' ', clean_q, flags=re.IGNORECASE).strip()
+                clean_q = ' '.join(clean_q.split())
+                if clean_q and len(clean_q) > 1:
+                    import urllib.parse
+                    encoded = urllib.parse.quote_plus(clean_q)
+                    target_url = f"https://www.youtube.com/results?search_query={encoded}"
+                    desc = f"Open {target_app} and play '{clean_q}' on YouTube"
+                else:
+                    target_url = "https://www.youtube.com"
+                    desc = f"Launch {target_app} and open YouTube"
+            elif any(s in q for s in ["search", "google", "look up", "find"]):
+                clean_q = re.sub(r'\b(open|launch|in|browser|broswer|on|laptop|pc|please|can you|search|google|for|look up|find|and|the)\b', ' ', q, flags=re.IGNORECASE)
+                clean_q = re.sub(r'\b(brave|chrome|edge)\b', ' ', clean_q, flags=re.IGNORECASE).strip()
+                clean_q = ' '.join(clean_q.split())
+                if clean_q:
+                    import urllib.parse
+                    target_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(clean_q)}"
+                    desc = f"Search '{clean_q}' in {target_app}"
+                else:
+                    target_url = "https://www.google.com"
+                    desc = f"Launch {target_app}"
+            else:
+                desc = f"Launch {target_app}"
+
+            meta = {
+                "app": target_app,
+                "intent": "open_app",
+                "desktop_action": "APP_LAUNCH"
+            }
+            if target_url:
+                meta["url"] = target_url
+                
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=desc,
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata=meta
+            )
+            intent = Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.98, raw_query=query)
+            goal = Goal(primary_goal=desc)
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # 2. Calculator
+        if "calc" in q or any(op in q for op in [" + ", " - ", " * ", " / ", "plus", "minus", "times", "divide"]):
+            expr = re.sub(r'^(open calculator and|calculate|solve|what is)\s*', '', q, flags=re.IGNORECASE)
+            expr = re.sub(r'\s*(in calculator|on calculator)\s*$', '', expr, flags=re.IGNORECASE).strip()
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Calculate {expr} in Calculator",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={"app": "calculator", "intent": "calculate", "entity": expr, "desktop_action": "APP_INTENT_EXECUTE"}
+            )
+            return Plan(plan_id=str(uuid.uuid4()), intent=Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.95, raw_query=query), goal=Goal(primary_goal="Calculate expression"), tasks=[task])
+
+        # 3. Notepad
+        if "notepad" in q or "write note" in q:
+            text = re.sub(r'^(open notepad and|write in notepad|write note)\s*', '', q, flags=re.IGNORECASE).strip()
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description="Write text in Notepad",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={"app": "notepad", "intent": "write_note", "entity": text, "desktop_action": "APP_INTENT_EXECUTE"}
+            )
+            return Plan(plan_id=str(uuid.uuid4()), intent=Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.95, raw_query=query), goal=Goal(primary_goal="Write note"), tasks=[task])
+
+        # 4. Instant Messaging & Communication (WhatsApp by default, or Instagram / Telegram)
+        msg_patterns = [r'^msg\s+', r'^message\s+', r'^text\s+', r'^send\s+message\s+(?:to\s+)?', r'^send\s+msg\s+(?:to\s+)?']
+        is_msg_query = any(re.search(pat, q) for pat in msg_patterns) or ("msg " in q and any(k in q for k in ["whatsapp", "insta", "instagram", "telegram"]))
+        
+        if is_msg_query:
+            # Determine platform (DEFAULT: WhatsApp)
+            if "insta" in q or "instagram" in q:
+                target_platform = "instagram"
+            elif "telegram" in q:
+                target_platform = "telegram"
+            else:
+                target_platform = "whatsapp"
+
+            # Clean command prefix
+            clean = re.sub(r'^(?:please\s+)?(?:can\s+you\s+)?(?:open\s+(?:instagram|insta|whatsapp|telegram)\s+and\s+)?', '', q).strip()
+            clean = re.sub(r'^(?:msg|message|text|send\s+message\s+to|send\s+msg\s+to|send\s+message|send\s+msg)\s+', '', clean).strip()
+            
+            # Remove platform mentions from clean
+            clean = re.sub(r'\b(?:in|on)\s+(?:whatsapp|insta|instagram|telegram)\b', '', clean, flags=re.IGNORECASE).strip()
+            clean = re.sub(r'\b(?:fast|quickly|now|bro|ada)\b', '', clean, flags=re.IGNORECASE).strip()
+
+            parts = clean.split(" ", 1)
+            raw_contact = parts[0].strip().capitalize() if parts else "Recipient"
+            raw_msg = parts[1].strip() if len(parts) > 1 else query
+            raw_msg = re.sub(r'^(?:that|to|saying)\s+', '', raw_msg, flags=re.IGNORECASE).strip()
+
+            # Resolve contact alias
+            resolved_contact = raw_contact
+            try:
+                import os, json
+                contacts_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "devices", "known_contacts.json")
+                if os.path.exists(contacts_file):
+                    with open(contacts_file, "r", encoding="utf-8") as cf:
+                        c_data = json.load(cf)
+                        c_low = raw_contact.lower()
+                        if c_low in c_data:
+                            mapping = c_data[c_low]
+                            if isinstance(mapping, dict):
+                                t_plat = target_platform.lower().strip()
+                                if t_plat in ["instagram", "insta"]:
+                                    resolved_contact = mapping.get("instagram", raw_contact)
+                                elif t_plat in ["whatsapp"]:
+                                    resolved_contact = mapping.get("whatsapp", mapping.get("default", raw_contact))
+                                else:
+                                    resolved_contact = mapping.get(t_plat, mapping.get("default", raw_contact))
+                            elif isinstance(mapping, str):
+                                resolved_contact = mapping
+            except Exception:
+                pass
+
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Send {target_platform.capitalize()} message to {resolved_contact}",
+                required_tools=["device"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": target_platform,
+                    "intent": "send_message",
+                    "entity": resolved_contact,
+                    "message": raw_msg
+                }
+            )
+            intent = Intent(primary_intent=IntentType.COMMUNICATION, confidence=0.98, raw_query=query)
+            goal = Goal(primary_goal=f"Send {target_platform.capitalize()} message to {resolved_contact}")
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # 5. Open mobile app on phone (Instagram, WhatsApp, Telegram, etc.)
+        if (q.startswith("open ") or q.startswith("launch ")) and any(k in q for k in ["whatsapp", "instagram", "insta", "telegram", "phone", "camera", "gallery"]):
+            app_raw = "instagram" if any(k in q for k in ["instagram", "insta"]) else "whatsapp" if "whatsapp" in q else "telegram" if "telegram" in q else q.split(" ")[1].strip()
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Open {app_raw.capitalize()} on phone",
+                required_tools=["device"],
+                risk=RiskLevel.LOW,
+                action_metadata={"app": app_raw, "intent": "open_app", "entity": app_raw}
+            )
+            intent = Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.95, raw_query=query)
+            goal = Goal(primary_goal=f"Open {app_raw.capitalize()} on phone")
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # 6. Open generic desktop application (Only for true desktop apps, NOT phone/mobile apps)
+        if (q.startswith("open ") or q.startswith("launch ")) and not any(k in q for k in ["msg", "message", "send", "whatsapp", "telegram", "instagram", "insta", "text", "phone"]):
+            app_name = q.split(" ")[1].strip()
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Launch {app_name}",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={"app": app_name, "intent": "open_app", "desktop_action": "APP_LAUNCH"}
+            )
+            return Plan(plan_id=str(uuid.uuid4()), intent=Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.95, raw_query=query), goal=Goal(primary_goal=f"Launch {app_name}"), tasks=[task])
+
+        return None

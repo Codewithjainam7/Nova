@@ -24,20 +24,34 @@ class GroqProvider(ProviderInterface):
 
     async def generate(self, request: GenerationRequest) -> GenerationResponse:
         messages = self._convert_messages(request.messages)
-        model_name = request.model or os.getenv("GROQ_DEFAULT_MODEL", "llama-3.1-8b-instant")
+        model_name = request.model or os.getenv("GROQ_DEFAULT_MODEL", "openai/gpt-oss-20b")
         
+        # Ensure json directive if json_mode requested
+        if getattr(request, "json_mode", False):
+            has_json = any("json" in str(m.get("content", "")).lower() for m in messages)
+            if not has_json:
+                messages.insert(0, {"role": "system", "content": "You are a JSON assistant. Output valid JSON only."})
+
+        max_tokens = request.max_tokens or 1500
         kwargs = {
             "messages": messages,
             "model": model_name,
             "temperature": request.temperature,
-            "max_tokens": request.max_tokens,
+            "max_tokens": max_tokens,
             "stream": False
         }
         
         if getattr(request, "json_mode", False):
             kwargs["response_format"] = {"type": "json_object"}
             
-        response = await self.client.chat.completions.create(**kwargs)
+        try:
+            response = await self.client.chat.completions.create(**kwargs)
+        except Exception as e:
+            if "json" in str(e).lower() and "response_format" in kwargs:
+                del kwargs["response_format"]
+                response = await self.client.chat.completions.create(**kwargs)
+            else:
+                raise e
         
         usage = UsageMetrics()
         if response.usage:
@@ -54,7 +68,7 @@ class GroqProvider(ProviderInterface):
 
     async def generate_stream(self, request: GenerationRequest) -> AsyncGenerator[StreamingToken, None]:
         messages = self._convert_messages(request.messages)
-        model_name = request.model or os.getenv("GROQ_DEFAULT_MODEL", "llama-3.1-8b-instant")
+        model_name = request.model or os.getenv("GROQ_DEFAULT_MODEL", "openai/gpt-oss-20b")
         
         stream = await self.client.chat.completions.create(
             messages=messages,

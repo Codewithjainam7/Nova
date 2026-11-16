@@ -1,0 +1,24 @@
+{
+  "manav": {
+    "whatsapp": "Vedya",
+    "instagram": "Manav",
+    "telegram": "Manav",
+    "default": "Manav"
+  },
+  "vedya": {
+    "whatsapp": "Vedya",
+    "instagram": "Manav",
+    "telegram": "Manav",
+    "default": "Vedya"
+  },
+  "nandini": {
+    "instagram": "Nandini",
+    "whatsapp": "Nandini",
+    "default": "Nandini"
+  },
+  "jagrat": {
+    "whatsapp": "Jagrat",
+    "instagram": "Jagrat",
+    "default": "Jagrat"
+  }
+}
