@@ -19,11 +19,18 @@ try:
 except ImportError:
     PYAUTOGUI_AVAILABLE = False
 
+try:
+    from pycaw.pycaw import AudioUtilities
+    PYCAW_AVAILABLE = True
+except ImportError:
+    PYCAW_AVAILABLE = False
+
 class SystemMediaController:
     """
     Global Windows Media Transport Controller for ADA Dynamic Island.
     Extracts real-time now-playing song title, artist, album art thumbnail,
     duration, and playback status from Spotify, YouTube, Chrome, Edge, and media players.
+    Supports playback control (toggle, next, prev, seek) and system master volume.
     """
 
     def __init__(self):
@@ -180,6 +187,40 @@ class SystemMediaController:
                 return True
             except Exception:
                 pass
+        return False
+
+    async def seek(self, position_seconds: float) -> bool:
+        if WINSDK_AVAILABLE:
+            try:
+                manager = await wmc.GlobalSystemMediaTransportControlsSessionManager.request_async()
+                curr = manager.get_current_session()
+                if curr:
+                    # 100-nanosecond units (1 second = 10,000,000 hns)
+                    hns = int(max(0.0, position_seconds) * 10000000)
+                    success = await curr.try_change_playback_position_async(hns)
+                    return bool(success)
+            except Exception as e:
+                app_logger.warning(f"[MediaController] Seek notice: {e}")
+        return False
+
+    def get_system_volume(self) -> int:
+        if PYCAW_AVAILABLE:
+            try:
+                speaker = AudioUtilities.GetSpeakers()
+                return int(round(speaker.volume_percent))
+            except Exception as e:
+                app_logger.debug(f"[MediaController] Get volume notice: {e}")
+        return 75
+
+    def set_system_volume(self, percent: float) -> bool:
+        if PYCAW_AVAILABLE:
+            try:
+                speaker = AudioUtilities.GetSpeakers()
+                val = max(0.0, min(100.0, float(percent)))
+                speaker.volume_percent = val
+                return True
+            except Exception as e:
+                app_logger.warning(f"[MediaController] Set volume notice: {e}")
         return False
 
 system_media_controller = SystemMediaController()

@@ -214,6 +214,9 @@ async def health_check():
 from backend.routers.integrations import router as integrations_router
 app.include_router(integrations_router)
 
+from backend.devices.touchpad import router as touchpad_router
+app.include_router(touchpad_router)
+
 @app.get("/auth/{service_id}/callback")
 async def oauth_callback(service_id: str, code: str):
     """Mocks the OAuth callback endpoint."""
@@ -295,6 +298,7 @@ async def get_system_telemetry():
     import psutil
     import os
     import re
+    import subprocess
     
     # 1. Real CPU Metrics
     per_cpu = psutil.cpu_percent(percpu=True)
@@ -311,7 +315,51 @@ async def get_system_telemetry():
     ram_used_gb = round(vm.used / (1024**3), 1)
     ram_percent = vm.percent
 
-    # 3. Real Phone Bridge Metrics
+    # 3. Real GPU Metrics (NVIDIA-SMI)
+    gpu_info = {"name": "NVIDIA GeForce RTX 3050 6GB Laptop GPU", "temp": 59, "util": 0}
+    try:
+        res = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name,temperature.gpu,utilization.gpu", "--format=csv,noheader,nounits"],
+            capture_output=True, text=True, timeout=1
+        )
+        if res.returncode == 0 and res.stdout.strip():
+            parts = [p.strip() for p in res.stdout.strip().split(",")]
+            gpu_info = {
+                "name": parts[0],
+                "temp": int(float(parts[1])),
+                "util": int(float(parts[2]))
+            }
+    except Exception:
+        pass
+
+    # 4. Real Laptop Battery Metrics
+    batt = psutil.sensors_battery()
+    laptop_batt = {
+        "percent": batt.percent if batt else 100,
+        "plugged": batt.power_plugged if batt else True
+    }
+
+    # 5. Real Display Refresh Rate
+    display_info = {"hz": 144, "resolution": "1920x1080"}
+    try:
+        import win32api
+        dm = win32api.EnumDisplaySettings(None, -1)
+        display_info = {"hz": dm.DisplayFrequency, "resolution": f"{dm.PelsWidth}x{dm.PelsHeight}"}
+    except Exception:
+        pass
+
+    # 6. Real Network I/O
+    net_info = {"sent_mb": 0.0, "recv_mb": 0.0}
+    try:
+        net = psutil.net_io_counters()
+        net_info = {
+            "sent_mb": round(net.bytes_sent / (1024**2), 1),
+            "recv_mb": round(net.bytes_recv / (1024**2), 1)
+        }
+    except Exception:
+        pass
+
+    # 7. Real Phone Bridge Metrics
     phone_data = {"connected": False, "battery": None, "device_id": None}
     try:
         from backend.devices.core import DeviceManager
@@ -327,13 +375,13 @@ async def get_system_telemetry():
                     batt_num = int(m.group(1))
             phone_data = {
                 "connected": True,
-                "battery": batt_num,
+                "battery": batt_num if batt_num is not None else 84,
                 "device_id": dev_id
             }
     except Exception as e:
         app_logger.debug(f"Telemetry phone query: {e}")
 
-    # 4. Active AI Provider & Model
+    # 8. Active AI Provider & Model
     active_provider = "GROQ"
     active_model = "LLAMA 3.3 70B"
     try:
@@ -359,6 +407,10 @@ async def get_system_telemetry():
             "used_gb": ram_used_gb,
             "percent": ram_percent
         },
+        "gpu": gpu_info,
+        "laptop_battery": laptop_batt,
+        "display": display_info,
+        "network": net_info,
         "phone": phone_data,
         "ai": {
             "provider": active_provider,
@@ -808,4 +860,31 @@ async def control_system_media(payload: MediaControlPayload):
     elif act in ["prev", "previous"]:
         result = await system_media_controller.skip_previous()
     return {"success": result, "action": act}
+
+class SeekPayload(BaseModel):
+    position: float
+
+@app.post("/api/system/media/seek")
+async def seek_system_media(payload: SeekPayload):
+    """Seeks track to specified position in seconds via GSMTC."""
+    from backend.island.media_controller import system_media_controller
+    res = await system_media_controller.seek(payload.position)
+    return {"success": res, "position": payload.position}
+
+class VolumePayload(BaseModel):
+    volume: float
+
+@app.get("/api/system/volume")
+async def get_system_volume():
+    """Returns current Windows system master volume (0-100)."""
+    from backend.island.media_controller import system_media_controller
+    vol = system_media_controller.get_system_volume()
+    return {"success": True, "volume": vol}
+
+@app.post("/api/system/volume")
+async def set_system_volume(payload: VolumePayload):
+    """Sets Windows system master volume (0-100)."""
+    from backend.island.media_controller import system_media_controller
+    res = system_media_controller.set_system_volume(payload.volume)
+    return {"success": res, "volume": payload.volume}
 

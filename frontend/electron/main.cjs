@@ -35,6 +35,9 @@ let tray = null;
 let isQuitting = false;
 let backendProcess = null;
 let lastIslandToggle = 0;
+let islandUserX = null;
+let islandUserY = 10;
+let isIslandPinned = false;
 
 const FRONTEND_URL = process.env.VITE_DEV_SERVER_URL || 'http://localhost:5173';
 const BACKEND_URL = 'http://localhost:8000';
@@ -258,8 +261,18 @@ function createIslandWindow() {
     }
   });
 
-  // Auto-collapse when clicking outside the Island (guarded against focus switch blurs)
+  // Track window repositioning when user drags
+  islandWindow.on('moved', () => {
+    if (islandWindow && !islandWindow.isDestroyed()) {
+      const [x, y] = islandWindow.getPosition();
+      islandUserX = x;
+      islandUserY = y;
+    }
+  });
+
+  // Auto-collapse when clicking outside the Island (guarded against focus switch blurs & pin mode)
   islandWindow.on('blur', () => {
+    if (isIslandPinned) return;
     if (Date.now() - lastIslandToggle < 500) return;
     if (islandWindow && !islandWindow.isDestroyed()) {
       islandWindow.webContents.send('shortcut-triggered', 'collapse');
@@ -425,6 +438,22 @@ ipcMain.on('island-set-visible', (_event, visible) => {
 
 let collapseTimeout = null;
 
+ipcMain.on('island-pin', (_event, pinned) => {
+  isIslandPinned = !!pinned;
+  console.log('[Electron] Dynamic Island pinned state:', isIslandPinned);
+});
+
+ipcMain.on('island-reset-position', () => {
+  if (islandWindow && !islandWindow.isDestroyed()) {
+    const primaryDisplay = screen.getPrimaryDisplay();
+    const screenWidth = primaryDisplay.workAreaSize.width;
+    const currentBounds = islandWindow.getBounds();
+    islandUserX = Math.round((screenWidth - currentBounds.width) / 2);
+    islandUserY = 10;
+    islandWindow.setPosition(islandUserX, islandUserY);
+  }
+});
+
 ipcMain.on('island-expand', (_event, expanded, customHeight) => {
   if (!islandWindow || islandWindow.isDestroyed()) return;
   const primaryDisplay = screen.getPrimaryDisplay();
@@ -435,20 +464,35 @@ ipcMain.on('island-expand', (_event, expanded, customHeight) => {
     collapseTimeout = null;
   }
 
+  const currentBounds = islandWindow.getBounds();
+  const currentCenterX = islandUserX !== null ? Math.round(islandUserX + (currentBounds.width / 2)) : Math.round(screenWidth / 2);
+  const currentY = islandUserY !== null ? islandUserY : 10;
+
   if (expanded) {
-    const targetWidth = 490;
-    const targetHeight = customHeight || 305;
-    const targetX = Math.round((screenWidth - targetWidth) / 2);
-    islandWindow.setBounds({ x: targetX, y: 10, width: targetWidth, height: targetHeight });
+    const targetWidth = 520;
+    const targetHeight = customHeight || 420;
+    const targetX = Math.round(currentCenterX - (targetWidth / 2));
+    islandWindow.setBounds({ x: targetX, y: currentY, width: targetWidth, height: targetHeight });
   } else {
     collapseTimeout = setTimeout(() => {
       if (islandWindow && !islandWindow.isDestroyed()) {
         const targetWidth = 330;
         const targetHeight = 44;
-        const targetX = Math.round((screenWidth - targetWidth) / 2);
-        islandWindow.setBounds({ x: targetX, y: 10, width: targetWidth, height: targetHeight });
+        const targetX = Math.round(currentCenterX - (targetWidth / 2));
+        islandWindow.setBounds({ x: targetX, y: currentY, width: targetWidth, height: targetHeight });
       }
     }, 220);
+  }
+});
+
+ipcMain.on('island-move', (_event, dx, dy) => {
+  if (islandWindow && !islandWindow.isDestroyed()) {
+    const [x, y] = islandWindow.getPosition();
+    const newX = Math.round(x + dx);
+    const newY = Math.round(y + dy);
+    islandWindow.setPosition(newX, newY);
+    islandUserX = newX;
+    islandUserY = newY;
   }
 });
 
