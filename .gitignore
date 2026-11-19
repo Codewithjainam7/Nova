@@ -86,3 +86,14 @@ settings.json
 
 # Sensitive scratch scripts
 test_whatsapp_devisri.py
+
+# Temporary files & APK binaries
+temp_apks/
+temp_*.py
+test_tone.wav
+*.bak
+
+# Personal Call Recordings & Logs
+backend/devices/recordings/
+backend/devices/call_screening_logs.json
+backend/devices/test_beep.wav

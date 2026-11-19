@@ -217,6 +217,38 @@ app.include_router(integrations_router)
 from backend.devices.touchpad import router as touchpad_router
 app.include_router(touchpad_router)
 
+# Hermes Procedural Skills & Tiered Memory APIs
+from backend.capabilities.skill_engine import skill_engine
+from backend.memory.tiered_memory import tiered_memory
+
+@app.get("/api/skills")
+async def list_skills():
+    """Returns list of auto-learned and built-in procedural skills."""
+    return {"status": "SUCCESS", "skills": skill_engine.list_skills()}
+
+@app.post("/api/skills/{skill_name}/run")
+async def run_skill(skill_name: str, payload: dict = None):
+    """Executes a procedural skill."""
+    kwargs = payload or {}
+    return skill_engine.execute_skill(skill_name, **kwargs)
+
+@app.post("/api/skills/synthesize")
+async def synthesize_skill(payload: dict):
+    """Synthesizes a new executable skill and stores it in backend/skills/."""
+    name = payload.get("name", "")
+    code = payload.get("code", "")
+    desc = payload.get("description", "")
+    return skill_engine.synthesize_skill(name, code, desc)
+
+@app.get("/api/memory/tiered")
+async def get_tiered_memory():
+    """Returns USER.md and MEMORY.md profiles."""
+    return {
+        "status": "SUCCESS",
+        "user_profile": tiered_memory.read_user_profile(),
+        "system_facts": tiered_memory.read_system_facts()
+    }
+
 @app.get("/auth/{service_id}/callback")
 async def oauth_callback(service_id: str, code: str):
     """Mocks the OAuth callback endpoint."""

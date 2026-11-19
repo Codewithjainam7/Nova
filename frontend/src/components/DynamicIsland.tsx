@@ -64,6 +64,28 @@ interface MediaTrack {
 
 type IslandTab = 'music' | 'gaming';
 
+export type PaletteThemeKey = 'pink' | 'cyan' | 'purple' | 'emerald' | 'amber' | 'orange' | 'crimson' | 'silver';
+
+export interface ThemeConfig {
+  key: PaletteThemeKey;
+  name: string;
+  color: string;
+  accentClass: string;
+}
+
+export const THEMES: Record<PaletteThemeKey, ThemeConfig> = {
+  pink: { key: 'pink', name: 'Sakura Pink', color: '#f472b6', accentClass: 'text-rose-400' },
+  cyan: { key: 'cyan', name: 'Cyber Cyan', color: '#22d3ee', accentClass: 'text-cyan-400' },
+  purple: { key: 'purple', name: 'Electric Violet', color: '#a855f7', accentClass: 'text-purple-400' },
+  emerald: { key: 'emerald', name: 'Matrix Emerald', color: '#10b981', accentClass: 'text-emerald-400' },
+  amber: { key: 'amber', name: 'Sunset Gold', color: '#f59e0b', accentClass: 'text-amber-400' },
+  orange: { key: 'orange', name: 'Blaze Coral', color: '#ff6b4a', accentClass: 'text-orange-400' },
+  crimson: { key: 'crimson', name: 'Crimson Ruby', color: '#ef4444', accentClass: 'text-rose-500' },
+  silver: { key: 'silver', name: 'Ice Titanium', color: '#e2e8f0', accentClass: 'text-slate-200' },
+};
+
+export const THEME_KEYS: PaletteThemeKey[] = ['pink', 'cyan', 'purple', 'emerald', 'amber', 'orange', 'crimson', 'silver'];
+
 export const DynamicIsland: React.FC = () => {
   const { islandState, setIslandState } = useNovaStore();
   const { sendChat } = useNovaWebSocket();
@@ -73,12 +95,13 @@ export const DynamicIsland: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [recentResponse, setRecentResponse] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState('');
-  const [paletteMode, setPaletteMode] = useState<'pink' | 'cyan' | 'amber'>('pink');
+  const [paletteMode, setPaletteMode] = useState<PaletteThemeKey>('pink');
   const [isPinned, setIsPinned] = useState(false);
   
-  // Media State
+  // Media State & High-Precision Audio Sync Clock
   const [currentMedia, setCurrentMedia] = useState<MediaTrack | null>(null);
   const [playbackPos, setPlaybackPos] = useState<number>(0);
+  const lastSyncRef = useRef<{ title: string; pos: number; ts: number }>({ title: '', pos: 0, ts: Date.now() });
   const [volumeLevel, setVolumeLevel] = useState<number>(50);
 
   // Live Telemetry
@@ -128,7 +151,7 @@ export const DynamicIsland: React.FC = () => {
     return () => clearInterval(interval);
   }, []);
 
-  // Poll Media Controller (Real Windows GSMTC)
+  // Poll Media Controller (Real Windows GSMTC) with Intelligent Clock Sync
   useEffect(() => {
     let isMounted = true;
     const fetchMedia = async () => {
@@ -140,9 +163,31 @@ export const DynamicIsland: React.FC = () => {
           const track = data.media || data;
           if (track && track.title) {
             setCurrentMedia(track);
-            setPlaybackPos(track.position || 0);
+            const now = Date.now();
+            const incomingPos = typeof track.position === 'number' ? track.position : 0;
+
+            // If new song started, sync immediately
+            if (track.title !== lastSyncRef.current.title) {
+              lastSyncRef.current = { title: track.title, pos: incomingPos, ts: now };
+              setPlaybackPos(incomingPos);
+            } else {
+              // Expected position based on continuous local clock
+              const expectedPos = lastSyncRef.current.pos + (track.status === 'playing' ? (now - lastSyncRef.current.ts) / 1000 : 0);
+              const drift = Math.abs(incomingPos - expectedPos);
+
+              // Only snap if drift is significant (e.g. user scrubbed on Spotify/YouTube or loop restart)
+              if (drift > 2.0) {
+                lastSyncRef.current = { title: track.title, pos: incomingPos, ts: now };
+                setPlaybackPos(incomingPos);
+              } else {
+                // Smooth micro-calibration without sudden jumping
+                lastSyncRef.current = { title: track.title, pos: incomingPos, ts: now };
+              }
+            }
           } else {
             setCurrentMedia(null);
+            setPlaybackPos(0);
+            lastSyncRef.current = { title: '', pos: 0, ts: Date.now() };
           }
         }
       } catch {
@@ -151,38 +196,52 @@ export const DynamicIsland: React.FC = () => {
     };
 
     fetchMedia();
-    const pollInterval = setInterval(fetchMedia, 2000);
+    const pollInterval = setInterval(fetchMedia, 1500);
     return () => {
       isMounted = false;
       clearInterval(pollInterval);
     };
   }, []);
 
-  // Fetch initial master volume
+  // Live Bidirectional Volume Sync with Windows Master Volume
   useEffect(() => {
-    fetch('http://127.0.0.1:8000/api/system/volume')
-      .then(r => r.json())
-      .then(d => {
-        if (typeof d.volume === 'number') {
-          setVolumeLevel(d.volume);
-        }
-      })
-      .catch(() => {});
+    let isMounted = true;
+    const syncVolume = () => {
+      fetch('http://127.0.0.1:8000/api/system/volume')
+        .then(r => r.json())
+        .then(d => {
+          if (isMounted && typeof d.volume === 'number') {
+            setVolumeLevel(Math.round(d.volume));
+          }
+        })
+        .catch(() => {});
+    };
+
+    syncVolume();
+    const volInterval = setInterval(syncVolume, 1200);
+    return () => {
+      isMounted = false;
+      clearInterval(volInterval);
+    };
   }, []);
 
-  // Smooth 1-second client-side playback ticker
+  // Smooth 100ms client-side playback ticker for fluid scrubber progress (Continuous sub-second glide)
   useEffect(() => {
     if (!currentMedia || currentMedia.status !== 'playing') return;
     const ticker = setInterval(() => {
-      setPlaybackPos((prev) => {
-        if (currentMedia.duration > 0 && prev >= currentMedia.duration) {
-          return currentMedia.duration;
+      const now = Date.now();
+      if (lastSyncRef.current && lastSyncRef.current.title === currentMedia.title) {
+        const elapsed = (now - lastSyncRef.current.ts) / 1000;
+        const currentCalculatedPos = lastSyncRef.current.pos + elapsed;
+        if (currentMedia.duration > 0 && currentCalculatedPos >= currentMedia.duration) {
+          setPlaybackPos(currentMedia.duration);
+        } else {
+          setPlaybackPos(currentCalculatedPos);
         }
-        return prev + 1;
-      });
-    }, 1000);
+      }
+    }, 100);
     return () => clearInterval(ticker);
-  }, [currentMedia?.status, currentMedia?.duration]);
+  }, [currentMedia?.status, currentMedia?.duration, currentMedia?.title]);
 
   // Poll Real Hardware Telemetry (psutil + nvidia-smi + windows display + phone)
   useEffect(() => {
@@ -248,6 +307,7 @@ export const DynamicIsland: React.FC = () => {
   const handleSeek = async (newProgress: number) => {
     if (!currentMedia || currentMedia.duration <= 0) return;
     const targetSeconds = newProgress * currentMedia.duration;
+    lastSyncRef.current = { title: currentMedia.title, pos: targetSeconds, ts: Date.now() };
     setPlaybackPos(targetSeconds);
     try {
       await fetch('http://127.0.0.1:8000/api/system/media/seek', {
@@ -296,50 +356,85 @@ export const DynamicIsland: React.FC = () => {
     } catch {}
   };
 
-  // Mouse Dragging for Window Repositioning
-  const handleDragPointerDown = useCallback((e: React.PointerEvent) => {
+  // Mouse Dragging for Window Repositioning with Smooth 60fps RAF Throttle
+  const rafIdRef = useRef<number | null>(null);
+  const pendingDeltaRef = useRef({ dx: 0, dy: 0 });
+
+  const handleDragPointerDown = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
+    e.stopPropagation();
     isDraggingRef.current = true;
     dragStartRef.current = { x: e.screenX, y: e.screenY };
 
     const handlePointerMove = (moveEvt: PointerEvent) => {
       if (!isDraggingRef.current) return;
-      const dx = moveEvt.screenX - dragStartRef.current.x;
-      const dy = moveEvt.screenY - dragStartRef.current.y;
+      if (moveEvt.buttons === 0) {
+        handlePointerUp();
+        return;
+      }
+      pendingDeltaRef.current.dx += moveEvt.screenX - dragStartRef.current.x;
+      pendingDeltaRef.current.dy += moveEvt.screenY - dragStartRef.current.y;
       dragStartRef.current = { x: moveEvt.screenX, y: moveEvt.screenY };
 
-      try {
-        if ((window as any).electronAPI?.moveIsland) {
-          (window as any).electronAPI.moveIsland(dx, dy);
-        }
-      } catch {}
+      if (rafIdRef.current === null) {
+        rafIdRef.current = requestAnimationFrame(() => {
+          if (pendingDeltaRef.current.dx !== 0 || pendingDeltaRef.current.dy !== 0) {
+            try {
+              if ((window as any).electronAPI?.moveIsland) {
+                (window as any).electronAPI.moveIsland(
+                  pendingDeltaRef.current.dx,
+                  pendingDeltaRef.current.dy
+                );
+              }
+            } catch {}
+            pendingDeltaRef.current.dx = 0;
+            pendingDeltaRef.current.dy = 0;
+          }
+          rafIdRef.current = null;
+        });
+      }
     };
 
     const handlePointerUp = () => {
       isDraggingRef.current = false;
+      if (rafIdRef.current !== null) {
+        cancelAnimationFrame(rafIdRef.current);
+        rafIdRef.current = null;
+      }
       window.removeEventListener('pointermove', handlePointerMove);
       window.removeEventListener('pointerup', handlePointerUp);
+      window.removeEventListener('pointercancel', handlePointerUp);
     };
 
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
   }, []);
 
   // Launch Wireless Touchpad on Phone
   const handleLaunchTouchpad = async (e?: React.MouseEvent) => {
     e?.stopPropagation();
     try {
+      setIslandState('executing', 'Opening Ultra Touchpad on Phone...');
       const res = await fetch('http://127.0.0.1:8000/api/devices/touchpad/launch', { method: 'POST' });
       if (res.ok) {
-        setRecentResponse("Wireless Trackpad opened on POCO phone!");
+        const data = await res.json();
+        if (data.status === 'SUCCESS') {
+          setRecentResponse("Wireless Trackpad opened on phone!");
+          setIslandState('idle', 'Touchpad active');
+        } else {
+          setRecentResponse(data.message || "Could not launch touchpad.");
+          setIslandState('idle');
+        }
       }
     } catch {
-      // Offline fallback
+      setRecentResponse("Backend offline: cannot open touchpad.");
+      setIslandState('idle');
     }
   };
 
-  // Expanded height: 425px gives generous clearance for all 4 cards, input bar, and chips
-  const expandedHeight = activeTab === 'gaming' ? 425 : 335;
+  // Expanded height: Generous clearance so no element or border is ever clipped
+  const expandedHeight = activeTab === 'gaming' ? 440 : (currentMedia && currentMedia.title ? 360 : 320);
 
   // Inform Electron of dynamic bounds
   useEffect(() => {
@@ -430,45 +525,54 @@ export const DynamicIsland: React.FC = () => {
   };
 
   const isVoiceActive = islandState === 'voice-listening' || isListening;
-  const themeColor = paletteMode === 'pink' ? '#f472b6' : paletteMode === 'cyan' ? '#22d3ee' : '#f59e0b';
-  const themeAccentClass = paletteMode === 'pink' ? 'text-rose-400' : paletteMode === 'cyan' ? 'text-cyan-400' : 'text-amber-400';
+  const currentTheme = THEMES[paletteMode] || THEMES.pink;
+  const themeColor = currentTheme.color;
+  const themeAccentClass = currentTheme.accentClass;
 
   return (
     <div className="fixed top-0 left-0 w-full flex justify-center pointer-events-none z-[999999] select-none font-sans">
       <motion.div
-        layout
-        initial={{ y: -50, opacity: 0, scale: 0.96 }}
+        initial={{ y: -50, opacity: 0 }}
         animate={{
-          y: 6,
+          y: 0,
           opacity: 1,
-          scale: 1,
-          width: expanded ? 516 : (currentMedia ? 336 : 240), // More compact idle pill
-          height: expanded ? expandedHeight : 44
+          width: expanded ? 516 : (currentMedia ? 336 : 240),
+          height: expanded ? expandedHeight : 44,
+          borderRadius: expanded ? 14 : 22
         }}
         transition={{
-          type: 'spring',
-          stiffness: 420,
-          damping: 36,
+          type: "spring",
+          stiffness: 300,
+          damping: 28,
           mass: 0.8
         }}
         className={clsx(
           "pointer-events-auto overflow-hidden relative flex flex-col justify-start",
-          "rounded-[26px] border border-white/12 shadow-[0_25px_60px_rgba(0,0,0,0.98)]",
-          "bg-[#0a0b10] text-white", // Solid OLED Dark (NO transparency)
-          expanded ? "ring-1 ring-white/15" : "hover:border-white/25 transition-all cursor-pointer"
+          "border border-white/15",
+          expanded ? "border-white/20 shadow-none" : "shadow-none hover:border-white/30 transition-colors cursor-pointer",
+          "bg-[#0a0b10] text-white", // Solid OLED Dark
         )}
         style={{ transformOrigin: "top center" }}
         onClick={() => !expanded && setExpanded(true)}
       >
-        {/* Ambient Top Glow Accent */}
+        {/* Apple Style Smooth Radial Glow Accent (Pure vector gradient, zero blur filter bleeding) */}
         <div
-          className="absolute -top-10 left-1/2 -translate-x-1/2 w-48 h-12 rounded-full blur-2xl pointer-events-none opacity-30 transition-colors duration-500"
-          style={{ backgroundColor: themeColor }}
+          className="absolute top-0 left-0 right-0 h-20 pointer-events-none opacity-20 transition-opacity duration-500 z-0"
+          style={{
+            background: `radial-gradient(ellipse 80% 50% at 50% 0%, ${themeColor} 0%, transparent 100%)`
+          }}
         />
 
-        {/* ---------------- COLLAPSED PILL STATE ---------------- */}
-        {!expanded ? (
-          <div className="w-full h-11 px-3 flex items-center justify-between gap-2 select-none">
+        {/* ---------------- COLLAPSED PILL STATE (Fluid absolute overlay) ---------------- */}
+        <div
+          className={clsx(
+            "w-full h-11 px-3 flex items-center justify-between gap-2 select-none absolute top-0 left-0 z-10",
+            "transition-[opacity,transform] duration-200 ease-out",
+            expanded
+              ? "opacity-0 pointer-events-none scale-95"
+              : "opacity-100 pointer-events-auto scale-100 delay-100"
+          )}
+        >
             {/* Movable Drag Grip on Left */}
             <div
               onPointerDown={handleDragPointerDown}
@@ -498,7 +602,7 @@ export const DynamicIsland: React.FC = () => {
               ) : (
                 <span className={clsx(
                   "w-2 h-2 rounded-full shrink-0",
-                  isVoiceActive ? "bg-cyan-400 animate-ping" : "bg-cyan-400 shadow-[0_0_8px_#22d3ee]"
+                  isVoiceActive ? "bg-cyan-400 animate-ping" : "bg-cyan-400 ring-2 ring-cyan-400/50"
                 )} />
               )}
 
@@ -541,10 +645,18 @@ export const DynamicIsland: React.FC = () => {
                 Alt+Space
               </span>
             </div>
-          </div>
-        ) : (
-          /* ---------------- EXPANDED ISLAND STATE ---------------- */
-          <div className="w-full flex-1 flex flex-col p-3 overflow-hidden select-none">
+        </div>
+
+        {/* ---------------- EXPANDED ISLAND STATE (Snappy clean transition) ---------------- */}
+        <div
+          className={clsx(
+            "w-full flex-1 flex flex-col p-3 overflow-hidden select-none relative z-10",
+            "transition-[opacity,transform] duration-240 ease-[cubic-bezier(0.16,1,0.3,1)]",
+            expanded
+              ? "opacity-100 pointer-events-auto translate-y-0 scale-100 delay-100"
+              : "opacity-0 pointer-events-none translate-y-2 scale-[0.98]"
+          )}
+        >
             {/* 0. MOVABLE DRAG GRIP BAR (DRAG TO MOVE ISLAND ANYWHERE ON SCREEN) */}
             <div
               onPointerDown={handleDragPointerDown}
@@ -571,7 +683,7 @@ export const DynamicIsland: React.FC = () => {
                   className={clsx(
                     "px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer pointer-events-auto",
                     activeTab === 'music'
-                      ? "bg-white/15 text-white border border-white/20 shadow-sm"
+                      ? "bg-white/15 text-white border border-white/20"
                       : "text-white/60 hover:text-white hover:bg-white/5"
                   )}
                 >
@@ -586,7 +698,7 @@ export const DynamicIsland: React.FC = () => {
                   className={clsx(
                     "px-3 py-1 rounded-full text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer pointer-events-auto",
                     activeTab === 'gaming'
-                      ? "bg-white/15 text-white border border-white/20 shadow-sm"
+                      ? "bg-white/15 text-white border border-white/20"
                       : "text-white/60 hover:text-white hover:bg-white/5"
                   )}
                 >
@@ -620,16 +732,23 @@ export const DynamicIsland: React.FC = () => {
                   <RotateCcw className="w-3 h-3" />
                 </button>
 
-                {/* Accent Palette */}
+                {/* Accent Palette (Cycles through 8 vibrant color themes) */}
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setPaletteMode(prev => prev === 'pink' ? 'cyan' : prev === 'cyan' ? 'amber' : 'pink');
+                    setPaletteMode(prev => {
+                      const idx = THEME_KEYS.indexOf(prev);
+                      return THEME_KEYS[(idx + 1) % THEME_KEYS.length];
+                    });
                   }}
-                  className="p-1.5 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-white/70 hover:text-white transition-all cursor-pointer"
-                  title="Switch Accent Theme"
+                  className="p-1.5 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-white/70 hover:text-white transition-all cursor-pointer flex items-center gap-1.5"
+                  title={`Switch Theme: ${currentTheme.name} (${THEME_KEYS.indexOf(paletteMode) + 1}/${THEME_KEYS.length})`}
                 >
+                  <span
+                    className="w-2 h-2 rounded-full border border-white/40 shadow-sm"
+                    style={{ backgroundColor: currentTheme.color }}
+                  />
                   <Palette className="w-3 h-3" />
                 </button>
 
@@ -654,18 +773,18 @@ export const DynamicIsland: React.FC = () => {
                   <div className="flex items-center gap-3.5">
                     {/* Album Art with Floating Music Badge */}
                     <div className="relative shrink-0">
-                      <div className="w-[54px] h-[54px] rounded-2xl overflow-hidden bg-zinc-900 border border-white/10 shadow-lg flex items-center justify-center">
+                      <div className="w-[54px] h-[54px] rounded-2xl overflow-hidden bg-zinc-900 border border-white/10 flex items-center justify-center">
                         {currentMedia?.thumbnail ? (
                           <img src={currentMedia.thumbnail} alt={currentMedia.title} className="w-full h-full object-cover" />
                         ) : (
                           <div className="w-full h-full bg-gradient-to-b from-purple-700 via-pink-600 to-amber-400 flex items-center justify-center relative overflow-hidden">
-                            <div className="w-6 h-6 rounded-full bg-amber-200/90 shadow-md shadow-amber-300/40" />
+                            <div className="w-6 h-6 rounded-full bg-amber-200/90 " />
                           </div>
                         )}
                       </div>
                       {/* Floating Rounded Music Badge */}
                       <div
-                        className="w-5 h-5 rounded-lg flex items-center justify-center absolute -bottom-1 -right-1 shadow-md shadow-black/80"
+                        className="w-5 h-5 rounded-lg flex items-center justify-center absolute -bottom-1 -right-1 "
                         style={{ backgroundColor: themeColor }}
                       >
                         <Music className="w-3 h-3 text-black fill-black" />
@@ -696,7 +815,7 @@ export const DynamicIsland: React.FC = () => {
                         type="button"
                         onClick={(e) => handleMediaControl(e, 'toggle')}
                         title={currentMedia?.status === 'playing' ? "Pause" : "Play"}
-                        className="p-2.5 rounded-full bg-white text-black hover:scale-105 active:scale-95 transition-all shadow-md shadow-white/20 cursor-pointer"
+                        className="p-2.5 rounded-full bg-white text-black hover:scale-105 active:scale-95 transition-all  cursor-pointer"
                       >
                         {currentMedia?.status === 'playing' ? (
                           <Pause className="w-4 h-4 fill-black" />
@@ -715,20 +834,24 @@ export const DynamicIsland: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Middle Row: Signature Animated Squiggly Wave Scrubber (With Real Seeking) */}
-                  <div className="w-full px-0.5 pt-1">
-                    <SquigglyWave
-                      progress={currentMedia && currentMedia.duration > 0 ? playbackPos / currentMedia.duration : 0.28}
-                      isPlaying={currentMedia?.status === 'playing'}
-                      color={themeColor}
-                      width={484}
-                      onSeek={handleSeek}
-                    />
-                  </div>
+                  {/* Middle Row: Signature Animated Squiggly Wave Scrubber (Only when playing/available!) */}
+                  {currentMedia && currentMedia.duration > 0 ? (
+                    <div className="w-full px-0.5 pt-1">
+                      <SquigglyWave
+                        progress={playbackPos / currentMedia.duration}
+                        isPlaying={currentMedia?.status === 'playing'}
+                        color={themeColor}
+                        width={484}
+                        onSeek={handleSeek}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full h-[1px] bg-white/[0.06] my-1" />
+                  )}
 
                   {/* Bottom Row: Elapsed Time + Master Volume Slider + Remaining Time */}
                   <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400 px-0.5">
-                    <span>{formatTime(playbackPos || 0)}</span>
+                    <span>{currentMedia && currentMedia.duration > 0 ? formatTime(playbackPos) : "0:00"}</span>
 
                     {/* Windows Master Volume Slider */}
                     <div className="flex items-center gap-2 group">
@@ -875,7 +998,7 @@ export const DynamicIsland: React.FC = () => {
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
                     placeholder="Ask ADA anything (e.g. organize desktop, briefing, lock laptop)..."
-                    className="w-full h-8 pl-8 pr-16 bg-white/[0.06] border border-white/[0.08] focus:border-white/20 rounded-xl text-xs text-white placeholder-white/40 focus:outline-none transition-all shadow-inner"
+                    className="w-full h-8 pl-8 pr-16 bg-white/[0.06] border border-white/[0.08] focus:border-white/20 rounded-xl text-xs text-white placeholder-white/40 focus:outline-none transition-all "
                   />
                   <Sparkles className="w-3.5 h-3.5 text-white/40 absolute left-2.5 pointer-events-none" />
                   <div className="absolute right-1.5 flex items-center gap-1">
@@ -919,7 +1042,7 @@ export const DynamicIsland: React.FC = () => {
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); handleLaunchTouchpad(e); }}
-                  className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-cyan-500/10 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 flex items-center gap-1 shrink-0 transition-all shadow-sm cursor-pointer"
+                  className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-cyan-500/10 hover:bg-cyan-500/25 text-cyan-300 border border-cyan-500/30 flex items-center gap-1 shrink-0 transition-all cursor-pointer"
                   title="Turn POCO Phone into Wireless Laptop Trackpad"
                 >
                   <Smartphone className="w-2.5 h-2.5 text-cyan-400" />
@@ -964,7 +1087,7 @@ export const DynamicIsland: React.FC = () => {
               <span className="flex items-center gap-1.5">
                 <span className={clsx(
                   "w-1.5 h-1.5 rounded-full",
-                  isVoiceActive ? "bg-cyan-400 animate-ping" : "bg-cyan-400 shadow-[0_0_6px_#22d3ee]"
+                  isVoiceActive ? "bg-cyan-400 animate-ping" : "bg-cyan-400 ring-2 ring-cyan-400/50"
                 )} />
                 <span className="text-white/60">SYS:</span>
                 <span className="text-cyan-400 uppercase font-semibold">
@@ -975,8 +1098,7 @@ export const DynamicIsland: React.FC = () => {
               <span>{currentTime}</span>
               <span className="text-white/40 font-mono font-medium">ADA v1.0</span>
             </div>
-          </div>
-        )}
+        </div>
       </motion.div>
     </div>
   );
