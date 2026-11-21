@@ -172,10 +172,22 @@ async def lifespan(app: FastAPI):
     app_logger.info(f"Loaded Modules: SettingsSystem, NovaKernel, EventBus, ChatSystem, ProviderManager, AutoADB")
     app_logger.info(f"Version: 1.0.0, Environment: Production")
     
+    # Auto-start Cloudflare Remote Tunnel for Mobile Phone access
+    try:
+        from backend.cloud.tunnel import tunnel_manager
+        asyncio.create_task(asyncio.to_thread(tunnel_manager.start_tunnel, 8000))
+    except Exception as te:
+        app_logger.warning(f"Failed to auto-start Cloudflare tunnel: {te}")
+    
     yield
     
     # Shutdown Sequence
     app_logger.info("Initiating ADA Runtime Shutdown...")
+    try:
+        from backend.cloud.tunnel import tunnel_manager
+        tunnel_manager.stop_tunnel()
+    except Exception:
+        pass
     try:
         if hasattr(app.state, "zeroconf_tuple"):
             zc, browser = app.state.zeroconf_tuple
@@ -216,6 +228,13 @@ app.include_router(integrations_router)
 
 from backend.devices.touchpad import router as touchpad_router
 app.include_router(touchpad_router)
+
+from backend.cloud.tunnel import router as cloud_router
+app.include_router(cloud_router)
+
+from fastapi.responses import HTMLResponse
+from backend.cloud.tunnel import get_mobile_hub
+app.get("/mobile", response_class=HTMLResponse)(get_mobile_hub)
 
 # Hermes Procedural Skills & Tiered Memory APIs
 from backend.capabilities.skill_engine import skill_engine

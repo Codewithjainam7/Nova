@@ -97,3 +97,6 @@ test_tone.wav
 backend/devices/recordings/
 backend/devices/call_screening_logs.json
 backend/devices/test_beep.wav
+
+backend/cloud/bin/
+*.exe

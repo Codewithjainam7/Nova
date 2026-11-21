@@ -627,7 +627,13 @@ async def launch_touchpad_on_phone():
         pass
 
     lan_ip = _get_lan_ip()
-    touchpad_url = "http://localhost:8000/touchpad" if tunnel_success else f"http://{lan_ip}:8000/touchpad"
+    from backend.cloud.tunnel import tunnel_manager
+    if tunnel_success:
+        touchpad_url = "http://localhost:8000/touchpad"
+    elif tunnel_manager.public_url:
+        touchpad_url = f"{tunnel_manager.public_url}/touchpad"
+    else:
+        touchpad_url = f"http://{lan_ip}:8000/touchpad" 
 
     try:
         subprocess.run([adb_path, "-s", target, "shell", "input", "keyevent", "224"], timeout=2)
