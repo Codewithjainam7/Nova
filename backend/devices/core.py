@@ -75,7 +75,46 @@ class DeviceManager:
             app_logger.error(f"ADB connect exception: {e}")
             return False
 
-    def get_connected_devices(self) -> list:
+    def discover_and_reconnect(self) -> list:
+        """Attempts to reconnect to known devices, or scans local subnet/ARP table for Android devices on port 5555."""
+        # 1. Try known devices first
+        for dev in list(self.connected_devices):
+            if ":" in dev:
+                if self.connect(dev):
+                    active = self.get_connected_devices(auto_discover=False)
+                    if active:
+                        return active
+
+        # 2. Dynamic local subnet discovery via ARP table
+        try:
+            import socket
+            res = subprocess.run(["arp", "-a"], capture_output=True, text=True, timeout=2)
+            candidates = []
+            for line in res.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2 and ("dynamic" in line.lower() or "192.168." in line):
+                    ip = parts[0].strip()
+                    if ip.startswith("192.168.") and not ip.endswith(".1") and not ip.endswith(".255"):
+                        candidates.append(ip)
+
+            for ip in candidates:
+                s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                s.settimeout(0.3)
+                is_open = (s.connect_ex((ip, 5555)) == 0)
+                s.close()
+                if is_open:
+                    target = f"{ip}:5555"
+                    if self.connect(target):
+                        app_logger.info(f"[Auto-Discovery] Re-discovered Android phone at {target}")
+                        active = self.get_connected_devices(auto_discover=False)
+                        if active:
+                            return active
+        except Exception as e:
+            app_logger.debug(f"Auto-discovery scan exception: {e}")
+
+        return []
+
+    def get_connected_devices(self, auto_discover: bool = True) -> list:
         try:
             result = subprocess.run([self.adb_path, "devices"], capture_output=True, text=True)
             devices = []
@@ -84,9 +123,14 @@ class DeviceManager:
                     parts = line.split('\t')
                     if len(parts) > 0:
                         devices.append(parts[0].strip())
-            return devices
+            if devices:
+                return devices
         except Exception:
-            return self.connected_devices
+            pass
+
+        if auto_discover:
+            return self.discover_and_reconnect()
+        return []
 
     def get_battery_level(self, device_ip: Optional[str] = None) -> str:
         """Gets the battery level of the connected device."""
@@ -568,16 +612,23 @@ class DeviceManager:
         """Executes a semantic action on the primary connected device."""
         active_devices = self.get_connected_devices()
         
-        if not active_devices and not self.connected_devices:
-            return "Cannot execute action. No phone is currently connected."
+        if not active_devices:
+            active_devices = self.discover_and_reconnect()
+
+        if not active_devices:
+            return "Cannot execute action. No phone is currently connected. Please ensure Wireless Debugging is active or connect via USB."
             
-        target = active_devices[0] if active_devices else self.connected_devices[0]
+        target = active_devices[0]
         
         # Ensure connected
         if ":" in target:
             success = self.connect(target)
             if not success:
-                return "Cannot execute action. Failed to connect to device."
+                active_devices = self.discover_and_reconnect()
+                if active_devices:
+                    target = active_devices[0]
+                else:
+                    return "Cannot execute action. Failed to connect to device."
             
         if intent == "get_battery":
             level = self.get_battery_level(target)

@@ -153,6 +153,51 @@ class KernelPipeline:
                     content=final_response_text
                 )
 
+            # Phase 0.6: Hardware & Device Status Intercept (Instant phone battery, laptop telemetry)
+            q_lower = user_intent.lower().strip()
+            is_phone_battery = any(k in q_lower for k in [
+                "phone battery", "mobile battery", "battery in mobile", "battery of mobile",
+                "battery of phone", "battery in phone", "phone charge", "mobile charge",
+                "battery percent is there in mobile", "battery percent in mobile", "battery percentage in mobile",
+                "battery on phone", "battery on mobile", "battery percentage of phone", "battery of my phone",
+                "how much battery is in phone", "how much battery is in mobile", "how much charge in phone",
+                "how much battery percent is there in mobile"
+            ])
+            is_laptop_battery = any(k in q_lower for k in [
+                "laptop battery", "pc battery", "computer battery", "battery of laptop", "battery in laptop"
+            ])
+            is_telemetry_query = any(k in q_lower for k in [
+                "system telemetry", "telemetry status", "hardware status", "system status", "laptop telemetry"
+            ])
+
+            if is_phone_battery or is_laptop_battery or is_telemetry_query:
+                if is_phone_battery:
+                    await self._stream_progress(session, "Querying mobile device via ADB bridge...")
+                    from backend.devices.core import DeviceManager
+                    dm = DeviceManager()
+                    final_response_text = dm.execute_action("get_battery", "")
+                elif is_laptop_battery:
+                    import psutil
+                    b = psutil.sensors_battery()
+                    if b:
+                        final_response_text = f"Boss, your laptop battery is currently at {round(b.percent)}% ({'plugged in' if b.power_plugged else 'on battery'})."
+                    else:
+                        final_response_text = "Boss, your laptop battery telemetry is currently unavailable."
+                else:
+                    import psutil
+                    cpu = psutil.cpu_percent()
+                    vm = psutil.virtual_memory()
+                    final_response_text = f"Boss, live telemetry: CPU load is {cpu}%, RAM usage is {vm.percent}% ({round(vm.used / (1024**3), 1)} / {round(vm.total / (1024**3), 1)} GB)."
+
+                session.update_state(KernelState.COMPLETED)
+                await self.event_bus.publish(KernelEventType.RESPONSE_COMPLETED, session)
+                return KernelResponse(
+                    request_id=request.request_id,
+                    session_id=session.session_id,
+                    status=KernelState.COMPLETED,
+                    content=final_response_text
+                )
+
             # Phase 0.7: Autonomous Silent Web Research & Search Intercept (Zero browser popups, Zero CAPTCHAs)
             search_markers = [
                 "search the web", "search on the web", "web search", "search online",
