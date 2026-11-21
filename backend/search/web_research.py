@@ -133,12 +133,25 @@ class WebResearchEngine:
 
         return self.search_duckduckgo_instant(search_query)
 
-    async def research_and_synthesize(self, query: str) -> str:
+    async def research_and_synthesize(self, query: str, conversation_history: Optional[str] = None) -> str:
         """
-        Executes silent backend web search and synthesizes findings into an executive report.
+        Executes silent backend web search and synthesizes findings into an executive report,
+        incorporating multi-turn conversation history for context.
         """
         app_logger.info(f"[WebResearchEngine] Initiating silent backend research for query: '{query}'")
-        search_results = await self.execute_search(query, max_results=5)
+        
+        # If query refers to context (pronouns/short query) and history exists, enrich the search query
+        effective_query = query
+        ref_words = ["that", "it", "this", "they", "them", "he", "she", "in that", "about it", "more details"]
+        if conversation_history and any(w in query.lower() for w in ref_words):
+            # Extract last user query or topic from history to augment search
+            lines = [l.strip() for l in conversation_history.strip().splitlines() if l.strip()]
+            if lines:
+                effective_query = f"{lines[-1][:60]} {query}"
+
+        search_results = await self.execute_search(effective_query, max_results=5)
+        if not search_results and effective_query != query:
+            search_results = await self.execute_search(query, max_results=5)
         
         if not search_results:
             app_logger.info(f"[WebResearchEngine] No live search hits found; synthesizing from cognitive knowledge base.")
@@ -155,14 +168,17 @@ class WebResearchEngine:
             "You have direct real-time access to live web intelligence on your backend. "
             "Be articulate, confident, clear, and executive. "
             "Highlight key facts, context, timeline, and current status. "
-            "Keep the response structured and concise (around 3 to 4 impactful sentences) so it can be comfortably spoken aloud via voice TTS and displayed cleanly in Dynamic Island."
+            "Answer thoroughly incorporating the user's conversation context and the live web intelligence. "
+            "Keep the response structured and impactful so it can be comfortably read or spoken aloud via voice TTS."
         )
         
+        history_block = f"Recent Conversation Context:\n{conversation_history}\n\n" if conversation_history else ""
         prompt = (
+            f"{history_block}"
             f"User Query: '{query}'\n\n"
             f"Live Web Intelligence retrieved from background search:\n"
             f"{research_context}\n\n"
-            f"Deliver an executive briefing directly answering the query based on this intelligence."
+            f"Deliver an executive briefing directly answering the query based on this intelligence and the conversation context."
         )
 
         # 1. Try Groq directly with qwen3.8-27b or openai/gpt-oss-120b for ultra-fast, high-quality synthesis

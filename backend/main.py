@@ -524,16 +524,33 @@ async def run_mission_endpoint(payload: MissionRunPayload):
     return {"status": "ok", "mission": result}
 
 class ChatPayload(BaseModel):
-    content: str
+    content: Optional[str] = None
+    message: Optional[str] = None
     conversation_id: str = "default"
 
+    @property
+    def text(self) -> str:
+        return (self.content or self.message or "").strip()
+
 @app.post("/chat")
+@app.post("/api/chat")
 async def post_chat(payload: ChatPayload):
-    req = KernelRequest(user_input=payload.content, conversation_id=payload.conversation_id)
+    text = payload.text
+    if not text:
+        return {"status": "error", "response": "Empty message"}
+    conv_id = payload.conversation_id or "default"
+    
+    # Save user message to persistent SQLite
+    user_msg = ChatMessage(type=ChatMessageType.USER, content=text)
+    await chat.add_message(conv_id, user_msg)
+    
+    req = KernelRequest(user_input=text, conversation_id=conv_id)
     response = await kernel.dispatch(req)
-    res_content = response.content if response.content else f"Echo: {payload.content}"
-    msg = ChatMessage(type=ChatMessageType.ASSISTANT, content=res_content)
-    await chat.add_message(payload.conversation_id, msg)
+    res_content = response.content if response.content else "I've processed your request."
+    
+    # Save assistant message to persistent SQLite
+    ast_msg = ChatMessage(type=ChatMessageType.ASSISTANT, content=res_content)
+    await chat.add_message(conv_id, ast_msg)
     return {"status": "success", "response": res_content}
 
 @app.get("/api/tts")
@@ -729,6 +746,7 @@ async def websocket_chat(websocket: WebSocket):
                 response = await kernel.dispatch(req)
                 
                 ast_msg.content = response.content if response.content else "Processing complete."
+                await chat.update_message(conv_id, ast_msg.message_id, ast_msg.content)
                 
                 await websocket.send_json({
                     "type": "message_complete",

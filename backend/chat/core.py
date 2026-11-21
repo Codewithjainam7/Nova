@@ -46,6 +46,9 @@ class ChatSystem:
             self.manager.store.save_conversation(conv)
             
         conv.messages.append(message)
+        from datetime import datetime
+        conv.updated_at = datetime.now()
+        self.manager.store.save_conversation(conv)
         ChatLogger.log_message(message)
         
         # Trigger UI Render
@@ -54,6 +57,21 @@ class ChatSystem:
         self.metrics.total_messages += 1
         elapsed = (time.time() - start) * 1000
         self._update_metric("avg_render_latency_ms", elapsed)
+
+    async def update_message(self, conversation_id: str, message_id: str, content: str):
+        conv = self.manager.store.get_conversation(conversation_id)
+        if not conv:
+            return
+        found = False
+        for m in conv.messages:
+            if m.message_id == message_id:
+                m.content = content
+                found = True
+                break
+        if found:
+            from datetime import datetime
+            conv.updated_at = datetime.now()
+            self.manager.store.save_conversation(conv)
         
     async def stream_response(self, conversation_id: str, stream: AsyncGenerator[str, None]):
         """Consumes a generator from the Response Generator engine and streams to UI."""

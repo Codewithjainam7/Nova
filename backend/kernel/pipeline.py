@@ -63,16 +63,16 @@ class KernelPipeline:
 
             # Inject Recent Conversation History
             conv = None
+            history_str = ""
             if chat_sys and hasattr(chat_sys, 'manager') and chat_sys.manager:
                 try:
                     conv = chat_sys.manager.store.get_conversation(request.conversation_id)
                 except Exception:
                     pass
             if conv and conv.messages:
-                # Get the last 6 messages (excluding the current one which was just added)
-                history_msgs = conv.messages[-7:-1]
-                if history_msgs:
-                    history_str = "\n".join([f"[{m.type.name}] {m.content}" for m in history_msgs])
+                prior_msgs = [m for m in conv.messages if m.content and m.content.strip() and m.content != user_intent][-8:]
+                if prior_msgs:
+                    history_str = "\n".join([f"[{'User' if m.type.name == 'USER' else 'ADA'}]: {m.content}" for m in prior_msgs])
                     execution_context += f"\nRecent Conversation History:\n{history_str}\n"
 
             # 1. Voice STT
@@ -159,17 +159,25 @@ class KernelPipeline:
                 "search for", "search about", "look up", "lookup", "research",
                 "find out about", "find out what", "find out who", "find information on",
                 "what happened to", "case of", "case about", "latest news on",
-                "latest updates on", "who is the ceo", "tell me about the case", "case"
+                "latest updates on", "who is the", "who was", "who is", "what is the latest",
+                "tell me about", "tell me more about", "how does", "how do", "why does",
+                "why did", "when did", "explain the", "overview of", "details about",
+                "who founded", "history of", "release date of", "features of"
             ]
-            q_lower = user_intent.lower()
+            q_lower = user_intent.lower().strip()
             is_explicit_browser = any(k in q_lower for k in [
                 "open brave", "open chrome", "open edge", "open browser",
                 "launch browser", "launch brave", "launch chrome", "play on youtube", "on youtube"
             ])
+            is_local_command = any(q_lower.startswith(act) for act in [
+                "open ", "launch ", "close ", "kill ", "lock ", "volume ", "set volume", "play ", "pause ", "skip ", "organize "
+            ])
+            is_question = q_lower.startswith(("who ", "what ", "why ", "when ", "where ", "how ", "is there ", "can you tell me", "tell me about", "explain "))
             is_search_intent = (
-                any(marker in q_lower for marker in search_markers) and
+                (any(marker in q_lower for marker in search_markers) or is_question) and
                 not is_explicit_browser and
-                len(user_intent.split()) >= 3
+                not is_local_command and
+                len(user_intent.split()) >= 2
             )
             
             if is_search_intent:
@@ -186,7 +194,10 @@ class KernelPipeline:
                 if not clean_search_q:
                     clean_search_q = user_intent
                     
-                final_response_text = await research_engine.research_and_synthesize(clean_search_q)
+                final_response_text = await research_engine.research_and_synthesize(
+                    clean_search_q,
+                    conversation_history=history_str if history_str else None
+                )
                 
                 # Output TTS if voice
                 if is_voice and voice:
@@ -336,8 +347,8 @@ class KernelPipeline:
                     except Exception:
                         pass
                 if conv and conv.messages:
-                    history_msgs = conv.messages[-7:-1]
-                    for m in history_msgs:
+                    prior_msgs = [m for m in conv.messages if m.content and m.content.strip() and m.content != user_intent][-8:]
+                    for m in prior_msgs:
                         role = Role.USER if m.type.name == "USER" else Role.ASSISTANT
                         messages.append(Message(role=role, content=m.content))
                         
