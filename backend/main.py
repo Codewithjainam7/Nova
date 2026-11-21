@@ -563,6 +563,28 @@ async def post_chat(payload: ChatPayload):
     user_msg = ChatMessage(type=ChatMessageType.USER, content=text)
     await chat.add_message(conv_id, user_msg)
     
+    # Broadcast to desktop app WebSocket in real time
+    try:
+        await chat_ws_manager.broadcast(json.dumps({
+            "type": "message_user",
+            "message": {
+                "id": user_msg.message_id,
+                "role": "user",
+                "content": text,
+                "timestamp": int(time.time() * 1000)
+            }
+        }))
+        await chat_ws_manager.broadcast(json.dumps({
+            "type": "message_chunk",
+            "message": {
+                "id": f"thinking_{int(time.time())}",
+                "role": "assistant",
+                "content": "Thinking..."
+            }
+        }))
+    except Exception:
+        pass
+
     req = KernelRequest(user_input=text, conversation_id=conv_id)
     response = await kernel.dispatch(req)
     res_content = response.content if response.content else "I've processed your request."
@@ -570,6 +592,20 @@ async def post_chat(payload: ChatPayload):
     # Save assistant message to persistent SQLite
     ast_msg = ChatMessage(type=ChatMessageType.ASSISTANT, content=res_content)
     await chat.add_message(conv_id, ast_msg)
+
+    # Broadcast completed response to desktop app
+    try:
+        await chat_ws_manager.broadcast(json.dumps({
+            "type": "message_complete",
+            "message": {
+                "id": ast_msg.message_id,
+                "role": "assistant",
+                "content": res_content
+            }
+        }))
+    except Exception:
+        pass
+
     return {"status": "success", "response": res_content}
 
 @app.get("/api/tts")

@@ -482,31 +482,37 @@ export const DynamicIsland: React.FC = () => {
   }, []);
 
   const handleDispatch = async (text: string) => {
-    if (!text.trim() || isSubmitting) return;
+    const cmd = text.trim();
+    if (!cmd || isSubmitting) return;
+
+    // Immediately clear input field so Enter feels instant
+    setInputValue('');
+    if (inputRef.current) {
+      inputRef.current.value = '';
+    }
+
     setIsSubmitting(true);
     setRecentResponse(null);
-    setIslandState('thinking', `Processing: "${text.slice(0, 24)}..."`);
+    setIslandState('thinking', `Processing: "${cmd.slice(0, 24)}..."`);
 
     try {
       const res = await fetch('http://127.0.0.1:8000/api/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: text })
+        body: JSON.stringify({ message: cmd })
       });
       if (res.ok) {
         const data = await res.json();
         const responseText = data.response || "Task executed successfully.";
         setRecentResponse(responseText);
-        setIslandState('executing', responseText);
-        setInputValue('');
+        setIslandState('idle', responseText);
       } else {
         setIslandState('idle', 'Execution completed.');
       }
     } catch {
-      sendChat(text);
+      sendChat(cmd);
       setRecentResponse("Action dispatched to ADA kernel.");
       setIslandState('idle');
-      setInputValue('');
     } finally {
       setIsSubmitting(false);
     }
@@ -514,7 +520,9 @@ export const DynamicIsland: React.FC = () => {
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    handleDispatch(inputValue);
+    if (inputValue.trim()) {
+      handleDispatch(inputValue);
+    }
   };
 
   const formatTime = (secs: number) => {
@@ -989,6 +997,24 @@ export const DynamicIsland: React.FC = () => {
                 </div>
               )}
 
+              {/* ---------------- LIVE RESPONSE PREVIEW CARD ---------------- */}
+              {recentResponse && (
+                <div className="w-full p-2.5 mb-2 rounded-xl bg-white/[0.07] border border-white/10 flex items-start justify-between gap-2 text-xs backdrop-blur-md">
+                  <div className="flex-1 max-h-24 overflow-y-auto no-scrollbar text-white/90 leading-relaxed select-text">
+                    <span className="text-cyan-400 font-semibold mr-1.5">ADA:</span>
+                    {recentResponse}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={(e) => { e.stopPropagation(); setRecentResponse(null); }}
+                    className="p-1 text-white/40 hover:text-white rounded-lg hover:bg-white/10 transition-colors shrink-0"
+                    title="Dismiss"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
               {/* ---------------- COMMAND INPUT BAR (100% VISIBLE WITH GENEROUS SPACING) ---------------- */}
               <form onSubmit={handleSubmit} className="relative w-full mt-2.5" style={{ WebkitAppRegion: 'no-drag' } as any}>
                 <div className="relative flex items-center">
@@ -997,6 +1023,14 @@ export const DynamicIsland: React.FC = () => {
                     type="text"
                     value={inputValue}
                     onChange={(e) => setInputValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        if (inputValue.trim()) {
+                          handleDispatch(inputValue);
+                        }
+                      }
+                    }}
                     placeholder="Ask ADA anything (e.g. organize desktop, briefing, lock laptop)..."
                     className="w-full h-8 pl-8 pr-16 bg-white/[0.06] border border-white/[0.08] focus:border-white/20 rounded-xl text-xs text-white placeholder-white/40 focus:outline-none transition-all "
                   />
