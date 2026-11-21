@@ -103,17 +103,41 @@ class WebResearchEngine:
             app_logger.error(f"[WebResearchEngine] Tavily error: {e}")
         return results
 
+    def search_wikipedia(self, query: str, max_results: int = 3) -> List[Dict[str, str]]:
+        """Queries Wikipedia Search API for authoritative factual abstracts."""
+        try:
+            url = f"https://en.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(query)}&format=json&utf8=1&srlimit={max_results}"
+            req = urllib.request.Request(url, headers={"User-Agent": "ADA-AutonomousAI/2.0 (research@nova.local)"})
+            with urllib.request.urlopen(req, timeout=4) as resp:
+                data = json.loads(resp.read().decode('utf-8'))
+                results = []
+                for item in data.get("query", {}).get("search", []):
+                    snippet = item.get("snippet", "").replace('<span class="searchmatch">', "").replace("</span>", "")
+                    clean_snip = re.sub(r'<[^>]+>', '', snippet).strip()
+                    results.append({
+                        "title": f"Wikipedia: {item.get('title')}",
+                        "url": f"https://en.wikipedia.org/wiki/{urllib.parse.quote(item.get('title'))}",
+                        "snippet": clean_snip
+                    })
+                return results
+        except Exception as e:
+            app_logger.debug(f"[WebResearchEngine] Wikipedia query notice: {e}")
+            return []
+
     async def execute_search(self, query: str, max_results: int = 5) -> List[Dict[str, str]]:
         """
         Unified search runner:
         1. Normalizes search query by removing conversational stop words.
         2. Checks for dedicated Tavily key if configured.
         3. Primary engine: Silent ddgs on backend (0 API keys, 0 CAPTCHAs, no browser window).
-        4. Fallback: DuckDuckGo Instant Answer API.
+        4. Secondary engine: Wikipedia API search.
+        5. Fallback: DuckDuckGo Instant Answer API.
         """
         # Clean leading stop words for optimal search index hit rate
         norm_q = re.sub(r'^(?:the|a|an|about|regarding|information\s+on|details\s+on)\s+', '', query.strip(), flags=re.IGNORECASE).strip()
         search_query = norm_q if norm_q else query
+
+        results: List[Dict[str, str]] = []
 
         tavily_key = os.getenv("TAVILY_API_KEY", "").strip()
         if tavily_key:
@@ -122,14 +146,16 @@ class WebResearchEngine:
                 return results
 
         results = self.search_ddgs(search_query, max_results)
+        if not results and search_query != query:
+            results = self.search_ddgs(query, max_results)
+
+        # Enhance with Wikipedia if needed
+        wiki_hits = self.search_wikipedia(search_query, max_results=2)
+        if wiki_hits:
+            results.extend(wiki_hits)
+
         if results:
             return results
-
-        # Try original query if normalized yielded nothing
-        if search_query != query:
-            results = self.search_ddgs(query, max_results)
-            if results:
-                return results
 
         return self.search_duckduckgo_instant(search_query)
 
@@ -142,12 +168,13 @@ class WebResearchEngine:
         
         # If query refers to context (pronouns/short query) and history exists, enrich the search query
         effective_query = query
-        ref_words = ["that", "it", "this", "they", "them", "he", "she", "in that", "about it", "more details"]
-        if conversation_history and any(w in query.lower() for w in ref_words):
-            # Extract last user query or topic from history to augment search
-            lines = [l.strip() for l in conversation_history.strip().splitlines() if l.strip()]
-            if lines:
-                effective_query = f"{lines[-1][:60]} {query}"
+        ref_patterns = [r"\bthat\b", r"\bit\b", r"\bthis\b", r"\bthey\b", r"\bthem\b", r"\bhe\b", r"\bshe\b", r"\bin that\b", r"\babout it\b", r"\bmore details\b"]
+        has_pronoun = any(re.search(pat, query.lower()) for pat in ref_patterns)
+        if conversation_history and has_pronoun:
+            user_lines = [l.replace("[User]:", "").strip() for l in conversation_history.strip().splitlines() if "[User]:" in l and l.strip()]
+            if user_lines:
+                last_user_topic = user_lines[-1][:50]
+                effective_query = f"{last_user_topic} {query}"
 
         search_results = await self.execute_search(effective_query, max_results=5)
         if not search_results and effective_query != query:
@@ -171,6 +198,13 @@ class WebResearchEngine:
             "Answer thoroughly incorporating the user's conversation context and the live web intelligence. "
             "Keep the response structured and impactful so it can be comfortably read or spoken aloud via voice TTS."
         )
+        try:
+            from backend.memory.tiered_memory import tiered_memory
+            sys_tier = tiered_memory.get_system_prompt_tier()
+            if sys_tier:
+                system_instruction += f"\n\n{sys_tier}"
+        except Exception:
+            pass
         
         history_block = f"Recent Conversation Context:\n{conversation_history}\n\n" if conversation_history else ""
         prompt = (
@@ -200,6 +234,7 @@ class WebResearchEngine:
                 if resp.status_code == 200:
                     content = resp.json()["choices"][0]["message"]["content"].strip()
                     if content:
+                        self._persist_research_report(query, content, search_results)
                         return content
             except Exception as ge:
                 app_logger.warning(f"[WebResearchEngine] Groq synthesis warning: {ge}")
@@ -219,13 +254,35 @@ class WebResearchEngine:
                 )
                 resp = await self.provider_manager.generate(req)
                 if resp and resp.content and resp.content.strip():
-                    return resp.content.strip()
+                    content = resp.content.strip()
+                    self._persist_research_report(query, content, search_results)
+                    return content
             except Exception as pe:
                 app_logger.warning(f"[WebResearchEngine] ProviderManager synthesis warning: {pe}")
                 
         # 3. Direct bullet fallback
         bullets = [f"• **{r['title']}**: {r['snippet'][:140]}..." for r in search_results[:3]]
-        return f"Regarding '{query}', here are the key findings:\n\n" + "\n".join(bullets)
+        fallback_res = f"Regarding '{query}', here are the key findings:\n\n" + "\n".join(bullets)
+        self._persist_research_report(query, fallback_res, search_results)
+        return fallback_res
+
+    def _persist_research_report(self, query: str, content: str, search_results: List[Dict[str, str]]):
+        """Persists synthesized research to workspace/reports and updates MEMORY.md."""
+        try:
+            import time
+            reports_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "workspace", "reports"))
+            os.makedirs(reports_dir, exist_ok=True)
+            safe_topic = re.sub(r'[^a-zA-Z0-9_]', '_', query[:40]).strip("_").lower()
+            report_file = os.path.join(reports_dir, f"{safe_topic}_{time.strftime('%Y%m%d_%H%M%S')}.md")
+            with open(report_file, "w", encoding="utf-8") as rf:
+                rf.write(f"# Executive Research Brief: {query}\n\n*Date: {time.strftime('%Y-%m-%d %H:%M:%S')}*\n\n{content}\n\n## Sources\n" + "\n".join([f"- [{s['title']}]({s['url']})" for s in search_results]))
+            
+            from backend.memory.tiered_memory import tiered_memory
+            first_sent = content.split(".")[0].replace("\n", " ").strip()
+            if len(first_sent) > 15:
+                tiered_memory.append_lesson(f"Research on {query[:30]}: {first_sent}.")
+        except Exception as e:
+            app_logger.debug(f"[WebResearchEngine] Persist research notice: {e}")
 
     async def _synthesize_fallback(self, query: str) -> str:
         """Fallback synthesis when search yields 0 live hits."""
@@ -234,11 +291,20 @@ class WebResearchEngine:
             try:
                 import requests
                 headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+                sys_msg = "You are ADA, an executive AI operating system. Provide a concise, accurate briefing answering the user's inquiry."
+                try:
+                    from backend.memory.tiered_memory import tiered_memory
+                    sys_tier = tiered_memory.get_system_prompt_tier()
+                    if sys_tier:
+                        sys_msg += f"\n\n{sys_tier}"
+                except Exception:
+                    pass
+
                 body = {
                     "model": "qwen/qwen3.8-27b",
                     "messages": [
-                        {"role": "system", "content": "You are ADA, an executive AI operating system. Provide a concise, accurate 2-sentence briefing answering the user's inquiry."},
-                        {"role": "user", "content": f"Provide an accurate summary regarding: '{query}'."}
+                        {"role": "system", "content": sys_msg},
+                        {"role": "user", "content": f"Provide an accurate response regarding: '{query}'."}
                     ],
                     "max_tokens": 300
                 }

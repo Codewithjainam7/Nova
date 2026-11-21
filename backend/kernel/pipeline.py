@@ -114,6 +114,21 @@ class KernelPipeline:
                 except Exception as me:
                     app_logger.debug(f"Memory retrieval notice: {me}")
 
+            # Tier 3: Hermes Tiered Architecture (USER.md + MEMORY.md + FTS5 Episodic Retrieval)
+            try:
+                from backend.memory.tiered_memory import tiered_memory
+                tiered_prompt = tiered_memory.get_system_prompt_tier()
+                if tiered_prompt:
+                    execution_context += f"\n[Hermes Memory Tier]:\n{tiered_prompt}\n"
+                    
+                fts_results = tiered_memory.search_episodic_memory(user_intent, limit=3)
+                if fts_results:
+                    fts_bullets = "\n".join([f"- [{time.strftime('%Y-%m-%d', time.localtime(r['timestamp']))}] ({r['role']}): {r['content'][:200]}" for r in fts_results if r.get('content')])
+                    if fts_bullets:
+                        execution_context += f"\n[Hermes Episodic Recall (FTS5)]:\n{fts_bullets}\n"
+            except Exception as te:
+                app_logger.debug(f"Hermes tiered memory injection notice: {te}")
+
             # Phase 0.5: Autonomous Overnight & Away Mission Intercept
             from backend.missions.mission_runner import MissionRunner
             mission_runner = MissionRunner(provider_manager)
@@ -198,6 +213,117 @@ class KernelPipeline:
                     content=final_response_text
                 )
 
+            # Phase 0.65: Hermes Procedural Skill Intercept (List, Run, Synthesize)
+            is_skill_list = any(k in q_lower for k in ["list skills", "show skills", "available skills", "what skills do you have"])
+            is_skill_run = q_lower.startswith(("run skill", "execute skill")) or any(k in q_lower for k in ["run skill ", "execute skill "])
+            is_skill_synth = any(q_lower.startswith(p) for p in ["synthesize skill", "create skill", "make skill", "generate skill", "write skill"])
+
+            if is_skill_list or is_skill_run or is_skill_synth:
+                from backend.capabilities.skill_engine import skill_engine
+                if is_skill_list:
+                    skills = skill_engine.list_skills()
+                    if skills:
+                        skill_bullets = "\n".join([f"• **{s['name']}**: {s['description']}" for s in skills])
+                        final_response_text = f"Boss, here are your active Hermes procedural skills:\n\n{skill_bullets}\n\nYou can execute any of them by saying *'run skill <name>'* or asking me to synthesize a new one."
+                    else:
+                        final_response_text = "No procedural skills currently installed in `backend/skills/`."
+                elif is_skill_run:
+                    import re
+                    clean_name = re.sub(r'^(?:please\s+)?(?:run|execute)\s+skill\s+', '', user_intent, flags=re.IGNORECASE).strip().lower()
+                    clean_name = clean_name.replace(" ", "_").replace("-", "_")
+                    app_logger.info(f"[Hermes] Executing skill '{clean_name}'")
+                    res = skill_engine.execute_skill(clean_name)
+                    if res.get("status") == "SUCCESS":
+                        dur = res.get("duration_ms", 0)
+                        inner = res.get("result", {})
+                        if isinstance(inner, dict):
+                            inner_fmt = "\n".join([f"• **{k}**: {v}" for k, v in inner.items()])
+                        else:
+                            inner_fmt = str(inner)
+                        final_response_text = f"Skill `{clean_name}` executed successfully in {dur}ms:\n\n{inner_fmt}"
+                    else:
+                        final_response_text = f"Failed to execute skill `{clean_name}`: {res.get('message', res.get('error', 'Unknown error'))}"
+                elif is_skill_synth:
+                    await self._stream_progress(session, "Synthesizing procedural skill code...")
+                    import re
+                    target_topic = re.sub(r'^(?:please\s+)?(?:synthesize|create|make|generate|write)\s+skill\s+(?:named\s+|for\s+|to\s+)?', '', user_intent, flags=re.IGNORECASE).strip()
+                    
+                    synth_prompt = (
+                        f"You are the Hermes Skill Synthesizer for ADA.\n"
+                        f"The user wants a procedural Python skill for: '{target_topic}'.\n\n"
+                        f"RULES:\n"
+                        f"1. Generate ONLY valid, standalone Python code defining a single entrypoint function: `def run(**kwargs):`\n"
+                        f"2. The function MUST return a dictionary with a key 'status': 'SUCCESS' or 'ERROR', plus any useful data.\n"
+                        f"3. Use standard Python libraries or already installed libraries (os, sys, psutil, time, subprocess, json, math, re, shutil).\n"
+                        f"4. Output ONLY raw Python code. Do not wrap in markdown quotes if possible, or use standard ```python block.\n"
+                        f"5. First line of code should be a docstring explaining the skill name and purpose."
+                    )
+                    
+                    groq_key = os.getenv("GROQ_API_KEY", "").strip()
+                    generated_code = ""
+                    if groq_key:
+                        try:
+                            import requests
+                            headers = {"Authorization": f"Bearer {groq_key}", "Content-Type": "application/json"}
+                            body = {
+                                "model": "llama-3.3-70b-versatile",
+                                "messages": [
+                                    {"role": "system", "content": "You are a Python systems automation engineer. Output ONLY valid Python code."},
+                                    {"role": "user", "content": synth_prompt}
+                                ],
+                                "max_tokens": 800,
+                                "temperature": 0.1
+                            }
+                            resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=body, timeout=15)
+                            if resp.status_code == 200:
+                                generated_code = resp.json()["choices"][0]["message"]["content"].strip()
+                        except Exception as ge:
+                            app_logger.warning(f"Groq skill synthesis warning: {ge}")
+
+                    if not generated_code and provider_manager:
+                        from backend.providers.schema import GenerationRequest, Message, Role, ProviderType
+                        g_req = GenerationRequest(
+                            messages=[Message(role=Role.USER, content=synth_prompt)],
+                            model="nvidia/nemotron-3.5-super-vl:free",
+                            provider_type=ProviderType.OPENROUTER,
+                            stream=False
+                        )
+                        g_resp = await provider_manager.generate(g_req)
+                        generated_code = g_resp.content.strip()
+
+                    clean_code = re.sub(r'^```python\s*', '', generated_code, flags=re.MULTILINE)
+                    clean_code = re.sub(r'^```\s*', '', clean_code, flags=re.MULTILINE).strip()
+                    
+                    name_match = re.search(r'Skill:\s*([a-zA-Z0-9_]+)', clean_code, re.IGNORECASE)
+                    if name_match:
+                        skill_name = name_match.group(1).lower().strip()
+                    else:
+                        first_word = target_topic.split()[0].replace("-", "_").lower() if target_topic else "custom"
+                        skill_name = re.sub(r'[^a-zA-Z0-9_]', '', first_word) or f"skill_{int(time.time())}"
+
+                    save_res = skill_engine.synthesize_skill(skill_name, clean_code, description=target_topic)
+                    if save_res.get("status") == "SUCCESS":
+                        test_res = skill_engine.execute_skill(skill_name)
+                        status_str = "verified and passed verification" if test_res.get("status") == "SUCCESS" else "saved with execution warning"
+                        final_response_text = (
+                            f"Boss, I have autonomously synthesized procedural skill `{skill_name}`.\n\n"
+                            f"**File:** `backend/skills/{skill_name}.py`\n"
+                            f"**Test Verification:** {status_str}\n\n"
+                            f"**Sample Output:**\n```json\n{json.dumps(test_res.get('result', test_res), indent=2)}\n```\n\n"
+                            f"You can invoke it anytime by saying *'run skill {skill_name}'*."
+                        )
+                    else:
+                        final_response_text = f"Failed to synthesize skill `{skill_name}`: {save_res.get('message')}"
+
+                session.update_state(KernelState.COMPLETED)
+                await self.event_bus.publish(KernelEventType.RESPONSE_COMPLETED, session)
+                return KernelResponse(
+                    request_id=request.request_id,
+                    session_id=session.session_id,
+                    status=KernelState.COMPLETED,
+                    content=final_response_text
+                )
+
             # Phase 0.7: Autonomous Silent Web Research & Search Intercept (Zero browser popups, Zero CAPTCHAs)
             search_markers = [
                 "search the web", "search on the web", "web search", "search online",
@@ -218,10 +344,16 @@ class KernelPipeline:
                 "open ", "launch ", "close ", "kill ", "lock ", "volume ", "set volume", "play ", "pause ", "skip ", "organize "
             ])
             is_question = q_lower.startswith(("who ", "what ", "why ", "when ", "where ", "how ", "is there ", "can you tell me", "tell me about", "explain "))
+            is_identity_or_profile_query = any(k in q_lower for k in [
+                "who am i", "what is my name", "what are my devices", "my profile", "about me",
+                "my preferences", "do you remember me", "what do you know about me", "who are you",
+                "what can you do", "who made you", "your name", "who are we"
+            ])
             is_search_intent = (
                 (any(marker in q_lower for marker in search_markers) or is_question) and
                 not is_explicit_browser and
                 not is_local_command and
+                not is_identity_or_profile_query and
                 len(user_intent.split()) >= 2
             )
             
@@ -383,6 +515,13 @@ class KernelPipeline:
                     "NEVER apologize or say you cannot open applications, control browsers, or perform actions on the laptop. "
                     "Always refer to yourself as ADA. Never call yourself Nova or a generic language model."
                 )
+                try:
+                    from backend.memory.tiered_memory import tiered_memory
+                    t_tier = tiered_memory.get_system_prompt_tier()
+                    if t_tier:
+                        ada_system_persona += f"\n\n{t_tier}"
+                except Exception:
+                    pass
                 messages = [Message(role=Role.SYSTEM, content=ada_system_persona)]
                 # Fetch history again for pure conversational mapping
                 conv = None
@@ -449,6 +588,15 @@ class KernelPipeline:
             await self._stream_progress(session, "Completed.")
             await self.event_bus.publish(KernelEventType.RESPONSE_COMPLETED, session)
             
+            # Phase 4.5: Hermes Tiered Memory Turn Indexing (FTS5)
+            try:
+                from backend.memory.tiered_memory import tiered_memory
+                if user_intent and final_response_text:
+                    tiered_memory.index_conversation_turn("user", user_intent, session_id=session.session_id)
+                    tiered_memory.index_conversation_turn("assistant", final_response_text, session_id=session.session_id)
+            except Exception:
+                pass
+
             return KernelResponse(
                 request_id=request.request_id,
                 session_id=session.session_id,
@@ -541,6 +689,19 @@ class KernelPipeline:
                             words = content.split()
                             if words:
                                 profile_store.upsert_contact(words[0], notes=content)
+
+                        # Update Hermes Tiered Memory (USER.md / MEMORY.md)
+                        try:
+                            from backend.memory.tiered_memory import tiered_memory
+                            if m_type == "preference" or "prefer" in content.lower():
+                                user_p = tiered_memory.read_user_profile()
+                                if content not in user_p:
+                                    with open(tiered_memory.user_md_path, "a", encoding="utf-8") as uf:
+                                        uf.write(f"- {content}\n")
+                            else:
+                                tiered_memory.append_lesson(content)
+                        except Exception:
+                            pass
 
                 routine_tracker.record_activity(action_type=user_intent[:30])
         except Exception as e:

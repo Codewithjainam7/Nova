@@ -59,6 +59,19 @@ class CapabilityRouter:
                 app_logger.error(f"Failed to render workspace: {e}")
                 return False
 
+        # 0.5 Hermes Procedural Skill Engine
+        if "skill" in tools or intent in ["run_skill", "execute_skill"]:
+            from backend.capabilities.skill_engine import skill_engine
+            import json
+            skill_name = task.action_metadata.get("skill_name") or app_name
+            if not skill_name:
+                skill_name = task.description.replace("run skill", "").replace("execute skill", "").strip()
+            skill_name = skill_name.replace(" ", "_").replace("-", "_").lower()
+            app_logger.info(f"[CapabilityRouter] Executing Hermes skill: '{skill_name}'")
+            res = skill_engine.execute_skill(skill_name, **task.action_metadata)
+            task.action_metadata["execution_output"] = json.dumps(res.get("result", res), indent=2)
+            return res.get("status") == "SUCCESS"
+
         # Device/Phone Management & Mobile App Guard
         desc_lower = task.description.lower()
         app_name = task.action_metadata.get("app", "").lower().strip()
