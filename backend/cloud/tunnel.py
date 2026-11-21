@@ -198,7 +198,7 @@ async def get_mobile_hub():
       align-items: center;
       gap: 8px;
       font-weight: 700;
-      font-size: 16px;
+      font-size: 15px;
       letter-spacing: 0.5px;
     }
     .status-dot {
@@ -207,6 +207,7 @@ async def get_mobile_hub():
       border-radius: 50%;
       background: #10b981;
       box-shadow: 0 0 8px #10b981;
+      transition: all 0.3s;
     }
     .views-container {
       flex: 1;
@@ -304,6 +305,7 @@ async def get_mobile_hub():
       justify-content: center;
       cursor: pointer;
       font-weight: bold;
+      flex-shrink: 0;
     }
 
     /* Controls HUD View */
@@ -406,7 +408,12 @@ async def get_mobile_hub():
       <span class="status-dot"></span>
       <span>ADA MOBILE OS</span>
     </div>
-    <div style="font-size: 12px; color: #64748b; font-family: monospace;" id="time-display">--:--</div>
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <button id="voice-toggle-btn" onclick="toggleVoice()" style="background: rgba(34, 211, 238, 0.15); border: 1px solid rgba(34, 211, 238, 0.3); color: #22d3ee; font-size: 11px; font-weight: 600; padding: 4px 8px; border-radius: 12px; cursor: pointer;">
+        🔊 Voice ON
+      </button>
+      <div style="font-size: 12px; color: #64748b; font-family: monospace;" id="time-display">--:--</div>
+    </div>
   </header>
 
   <div class="views-container">
@@ -414,7 +421,12 @@ async def get_mobile_hub():
     <div class="view active" id="view-chat">
       <div class="chat-messages" id="chat-msgs">
         <div class="msg ada">
-          Hello Boss! ADA is securely connected to your laptop via Cloudflare encrypted tunnel. How can I assist you?
+          <div>Hello Boss! ADA is online on your phone via Cloudflare encrypted tunnel. Tap "Speak" or chat anytime!</div>
+          <div style="margin-top: 6px;">
+            <button onclick="playAdaVoice('Hello Boss! ADA is online on your phone via Cloudflare encrypted tunnel.')" style="background: rgba(34, 211, 238, 0.12); border: 1px solid rgba(34, 211, 238, 0.25); color: #22d3ee; border-radius: 8px; font-size: 11px; padding: 2px 8px; cursor: pointer;">
+              🔊 Speak
+            </button>
+          </div>
         </div>
       </div>
       <div class="chips-bar">
@@ -424,7 +436,10 @@ async def get_mobile_hub():
         <div class="chip" onclick="quickSend('system telemetry status')">📊 Telemetry</div>
       </div>
       <div class="chat-input-bar">
-        <input type="text" class="chat-input" id="chat-input" placeholder="Ask ADA anything..." onkeydown="if(event.key==='Enter') sendMsg()">
+        <button id="mic-btn" onclick="toggleMic()" style="width: 40px; height: 40px; border-radius: 50%; background: rgba(255, 255, 255, 0.08); border: 1px solid rgba(255, 255, 255, 0.12); color: #cbd5e1; font-size: 18px; display: flex; align-items: center; justify-content: center; cursor: pointer; flex-shrink: 0;" title="Voice Input">
+          🎙️
+        </button>
+        <input type="text" class="chat-input" id="chat-input" placeholder="Speak or type to ADA..." onkeydown="if(event.key==='Enter') sendMsg()">
         <button class="chat-btn" onclick="sendMsg()">➤</button>
       </div>
     </div>
@@ -483,6 +498,16 @@ async def get_mobile_hub():
   </nav>
 
   <script>
+    let isVoiceEnabled = true;
+    let currentAudio = null;
+
+    // Mobile audio policy unlock on first user tap
+    window.addEventListener('touchstart', function unlockAudio() {
+      const silent = new Audio('data:audio/wav;base64,UklGRigAAABXQVZFZm10IBIAAAABAAEARKwAAIhYAQACABAAAABkYXRhAgAAAAEA');
+      silent.play().catch(() => {});
+      window.removeEventListener('touchstart', unlockAudio);
+    }, { once: true });
+
     function updateClock() {
       const now = new Date();
       document.getElementById('time-display').innerText = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
@@ -497,6 +522,112 @@ async def get_mobile_hub():
       document.getElementById('view-' + tab).classList.add('active');
       const idx = tab === 'chat' ? 0 : tab === 'touchpad' ? 1 : 2;
       document.querySelectorAll('.nav-item')[idx].classList.add('active');
+    }
+
+    function toggleVoice() {
+      isVoiceEnabled = !isVoiceEnabled;
+      const btn = document.getElementById('voice-toggle-btn');
+      btn.innerText = isVoiceEnabled ? '🔊 Voice ON' : '🔇 Muted';
+      btn.style.color = isVoiceEnabled ? '#22d3ee' : '#64748b';
+      btn.style.background = isVoiceEnabled ? 'rgba(34, 211, 238, 0.15)' : 'rgba(255, 255, 255, 0.05)';
+      if (!isVoiceEnabled && currentAudio) {
+        currentAudio.pause();
+        currentAudio = null;
+      }
+    }
+
+    function playAdaVoice(text) {
+      if (!isVoiceEnabled || !text) return;
+      try {
+        if (currentAudio) {
+          currentAudio.pause();
+          currentAudio = null;
+        }
+        let clean = text;
+        try { clean = decodeURIComponent(text); } catch {}
+        clean = clean.replace(/[*#`_~]/g, '').replace(/\[(.*?)\]\(.*?\)/g, '$1').trim();
+        if (!clean) return;
+
+        const snippet = clean.length > 350 ? clean.slice(0, 350) : clean;
+        const audioUrl = '/api/tts?text=' + encodeURIComponent(snippet);
+        currentAudio = new Audio(audioUrl);
+
+        const dot = document.querySelector('.status-dot');
+        if (dot) {
+          dot.style.background = '#22d3ee';
+          dot.style.boxShadow = '0 0 14px #22d3ee';
+        }
+
+        currentAudio.onended = () => {
+          if (dot) {
+            dot.style.background = '#10b981';
+            dot.style.boxShadow = '0 0 8px #10b981';
+          }
+          currentAudio = null;
+        };
+        currentAudio.onerror = (e) => {
+          if (dot) {
+            dot.style.background = '#10b981';
+            dot.style.boxShadow = '0 0 8px #10b981';
+          }
+          currentAudio = null;
+        };
+
+        currentAudio.play().catch(e => console.log('Audio autoplay prevented:', e));
+      } catch (err) {
+        console.error('playAdaVoice exception:', err);
+      }
+    }
+
+    // Speech-to-Text Recognition
+    let recognition = null;
+    let isListening = false;
+    function toggleMic() {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRecognition) {
+        alert('Voice input is not supported in this mobile browser. Please open in Google Chrome on Android.');
+        return;
+      }
+      const micBtn = document.getElementById('mic-btn');
+
+      if (isListening) {
+        if (recognition) recognition.stop();
+        isListening = false;
+        micBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+        micBtn.style.color = '#cbd5e1';
+        return;
+      }
+
+      recognition = new SpeechRecognition();
+      recognition.lang = 'en-US';
+      recognition.interimResults = false;
+      recognition.maxAlternatives = 1;
+
+      recognition.onstart = () => {
+        isListening = true;
+        micBtn.style.background = '#ef4444';
+        micBtn.style.color = '#fff';
+      };
+
+      recognition.onresult = (event) => {
+        const transcript = event.results[0][0].transcript;
+        document.getElementById('chat-input').value = transcript;
+        sendMsg();
+      };
+
+      recognition.onerror = () => {
+        isListening = false;
+        micBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+        micBtn.style.color = '#cbd5e1';
+      };
+
+      recognition.onend = () => {
+        isListening = false;
+        micBtn.style.background = 'rgba(255, 255, 255, 0.08)';
+        micBtn.style.color = '#cbd5e1';
+      };
+
+      recognition.start();
     }
 
     async function sendMsg() {
@@ -524,7 +655,17 @@ async def get_mobile_hub():
           body: JSON.stringify({ message: text })
         });
         const data = await res.json();
-        aDiv.innerText = data.response || 'Task executed.';
+        const reply = data.response || 'Task executed.';
+        
+        aDiv.innerHTML = `
+          <div>${reply.replace(/\n/g, '<br>')}</div>
+          <div style="margin-top: 6px;">
+            <button onclick="playAdaVoice(this.getAttribute('data-text'))" data-text="${encodeURIComponent(reply)}" style="background: rgba(34, 211, 238, 0.12); border: 1px solid rgba(34, 211, 238, 0.25); color: #22d3ee; border-radius: 8px; font-size: 11px; padding: 2px 8px; cursor: pointer;">
+              🔊 Speak
+            </button>
+          </div>
+        `;
+        playAdaVoice(reply);
       } catch (err) {
         aDiv.innerText = 'Connection error: ' + err.message;
       }
