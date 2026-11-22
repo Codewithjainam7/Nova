@@ -104,9 +104,9 @@ export const DynamicIsland: React.FC = () => {
   const lastSyncRef = useRef<{ title: string; pos: number; ts: number }>({ title: '', pos: 0, ts: Date.now() });
   const [volumeLevel, setVolumeLevel] = useState<number>(50);
 
-  type LightingSubMode = 'auto-rgb' | 'frequency' | 'solid';
-  const [lightingSubMode, setLightingSubMode] = useState<LightingSubMode>('frequency');
-  const [paletteMode, setPaletteMode] = useState<PaletteThemeKey>('rgb');
+  type LightingMode = 'single-sync' | 'spectrum-sync' | 'auto-rgb' | 'static';
+  const [lightingMode, setLightingMode] = useState<LightingMode>('single-sync');
+  const [paletteMode, setPaletteMode] = useState<PaletteThemeKey>('pink');
   const [rgbAngle, setRgbAngle] = useState<number>(0);
   const [audioEnergy, setAudioEnergy] = useState<{ bass: number; mid: number; treble: number }>({
     bass: 0,
@@ -590,34 +590,47 @@ export const DynamicIsland: React.FC = () => {
   };
 
   const isVoiceActive = islandState === 'voice-listening' || isListening;
-  const isRgbMode = paletteMode === 'rgb' || lightingSubMode === 'auto-rgb' || lightingSubMode === 'frequency';
-  
-  // Frequency-Driven Dynamic Color Synthesis:
-  // Bass -> Fiery Neon Crimson / Violet (300°-340°), Mids -> Electric Cyan / Azure (180°-210°), Treble -> Shimmering Gold (40°-60°)
+  const currentTheme = THEMES[paletteMode] || THEMES.pink;
+
+  // 1. Is Chroma Rainbow Theme selected?
+  const isChromaTheme = paletteMode === 'rgb';
+
+  // 2. Multi-color frequency synthesis (Bass=Ruby/Violet, Mid=Cyan, Treb=Gold)
   const dominantFreqHue = Math.round(
     (audioEnergy.bass * 320 + audioEnergy.mid * 190 + audioEnergy.treble * 50) /
     Math.max(0.01, audioEnergy.bass + audioEnergy.mid + audioEnergy.treble)
   );
-  const frequencyColor = `hsl(${dominantFreqHue}, 100%, 65%)`;
+  const spectrumRainbowColor = `hsl(${dominantFreqHue}, 100%, 65%)`;
 
-  const dynamicRgbColor = (lightingSubMode === 'frequency' && currentMedia?.status === 'playing')
-    ? frequencyColor
-    : `hsl(${rgbAngle}, 100%, 65%)`;
+  // 3. Time-to-time 360° rainbow flow
+  const autoChromaColor = `hsl(${rgbAngle}, 100%, 65%)`;
 
-  const currentTheme = THEMES[paletteMode] || THEMES.rgb;
-  const themeColor = isRgbMode ? dynamicRgbColor : currentTheme.color;
-  const themeAccentClass = isRgbMode ? 'text-cyan-400' : currentTheme.accentClass;
+  // 4. Resolve exact themeColor:
+  let themeColor = currentTheme.color;
+  if (isChromaTheme) {
+    if (lightingMode === 'spectrum-sync' && currentMedia?.status === 'playing') {
+      themeColor = spectrumRainbowColor;
+    } else {
+      themeColor = autoChromaColor;
+    }
+  } else {
+    // Single Color mode! (Sakura Pink, Cyber Cyan, Matrix Emerald, Electric Violet, etc.)
+    themeColor = currentTheme.color;
+  }
+
+  const isFrequencyReactive = (lightingMode === 'single-sync' || lightingMode === 'spectrum-sync') && currentMedia?.status === 'playing';
+  const themeAccentClass = isChromaTheme ? 'text-cyan-400' : currentTheme.accentClass;
 
   return (
-    <div className="fixed top-0 left-0 w-full flex justify-center pointer-events-none z-[999999] select-none font-sans">
+    <div className="fixed top-0 left-0 w-full h-full flex justify-center items-start pt-2 pointer-events-none z-[999999] select-none font-sans">
       <motion.div
-        initial={{ y: -50, opacity: 0 }}
+        initial={{ y: -20, opacity: 0 }}
         animate={{
           y: 0,
           opacity: 1,
           width: expanded ? 516 : (currentMedia ? 356 : 240),
           height: expanded ? expandedHeight : 44,
-          borderRadius: expanded ? 14 : 22
+          borderRadius: expanded ? 16 : 22
         }}
         transition={{
           type: "spring",
@@ -627,18 +640,22 @@ export const DynamicIsland: React.FC = () => {
         }}
         className={clsx(
           "pointer-events-auto overflow-hidden relative flex flex-col justify-start",
-          "border transition-colors duration-150",
-          expanded ? "shadow-none" : "shadow-none hover:border-white/40 cursor-pointer",
+          "border transition-all duration-150",
+          expanded ? "shadow-none" : "hover:border-white/40 cursor-pointer",
           "bg-[#0a0b10] text-white", // Solid OLED Dark
         )}
         style={{
           transformOrigin: "top center",
-          borderColor: isRgbMode
-            ? `hsl(${rgbAngle}, 100%, 65%, ${0.35 + (currentMedia?.status === 'playing' ? audioEnergy.bass * 0.45 : 0)})`
-            : (currentMedia?.status === 'playing' ? `${themeColor}60` : 'rgba(255, 255, 255, 0.15)'),
-          boxShadow: isRgbMode
-            ? `0 0 ${10 + (currentMedia?.status === 'playing' ? audioEnergy.bass * 18 : 2)}px hsl(${rgbAngle}, 95%, 55%, ${0.25 + (currentMedia?.status === 'playing' ? audioEnergy.bass * 0.4 : 0.08)})`
-            : (currentMedia?.status === 'playing' ? `0 0 ${8 + audioEnergy.bass * 12}px ${themeColor}40` : undefined)
+          borderColor: isChromaTheme
+            ? `hsl(${rgbAngle}, 100%, 65%, ${0.4 + (isFrequencyReactive ? audioEnergy.bass * 0.45 : 0)})`
+            : (isFrequencyReactive
+                ? themeColor
+                : (currentTheme.color ? `${currentTheme.color}99` : 'rgba(255, 255, 255, 0.2)')),
+          boxShadow: isChromaTheme
+            ? `0 0 ${12 + (isFrequencyReactive ? audioEnergy.bass * 20 : 4)}px hsl(${rgbAngle}, 95%, 55%, ${0.28 + (isFrequencyReactive ? audioEnergy.bass * 0.4 : 0.1)})`
+            : (isFrequencyReactive
+                ? `0 0 ${12 + audioEnergy.bass * 22}px ${themeColor}aa`
+                : `0 0 10px ${themeColor}40`)
         }}
         onClick={() => !expanded && setExpanded(true)}
       >
@@ -646,8 +663,8 @@ export const DynamicIsland: React.FC = () => {
         <div
           className="absolute top-0 left-0 right-0 h-24 pointer-events-none transition-opacity duration-300 z-0"
           style={{
-            opacity: currentMedia?.status === 'playing' ? 0.28 + audioEnergy.bass * 0.22 : 0.18,
-            background: isRgbMode
+            opacity: currentMedia?.status === 'playing' ? 0.3 + audioEnergy.bass * 0.25 : 0.18,
+            background: isChromaTheme
               ? `radial-gradient(ellipse 90% 60% at 50% 0%, hsl(${rgbAngle}, 100%, 60%) 0%, transparent 100%)`
               : `radial-gradient(ellipse 80% 50% at 50% 0%, ${themeColor} 0%, transparent 100%)`
           }}
@@ -996,18 +1013,58 @@ export const DynamicIsland: React.FC = () => {
                         <span>LIGHTING MODE</span>
                       </div>
 
-                      <div className="flex items-center gap-1 bg-black/40 p-0.5 rounded-lg border border-white/10">
-                        {/* Option 1: Auto RGB Flow */}
+                      <div className="flex items-center gap-1 bg-black/50 p-0.5 rounded-lg border border-white/10">
+                        {/* Option 1: Single Color Frequency Sync */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setLightingMode('single-sync');
+                            if (paletteMode === 'rgb') setPaletteMode('pink');
+                          }}
+                          className={clsx(
+                            "px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer",
+                            lightingMode === 'single-sync' && !isChromaTheme
+                              ? "bg-rose-500/25 text-rose-300 border border-rose-400/40 shadow-sm"
+                              : "text-white/50 hover:text-white"
+                          )}
+                          title="Sync music frequencies using your chosen color"
+                        >
+                          <Zap className="w-2.5 h-2.5 text-rose-400" />
+                          Single Color Sync
+                        </button>
+
+                        {/* Option 2: Multi-Color Spectrum Sync */}
                         <button
                           type="button"
                           onClick={(e) => {
                             e.stopPropagation();
                             setPaletteMode('rgb');
-                            setLightingSubMode('auto-rgb');
+                            setLightingMode('spectrum-sync');
                           }}
                           className={clsx(
                             "px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer",
-                            lightingSubMode === 'auto-rgb'
+                            lightingMode === 'spectrum-sync' && isChromaTheme
+                              ? "bg-emerald-500/25 text-emerald-300 border border-emerald-400/40 shadow-sm"
+                              : "text-white/50 hover:text-white"
+                          )}
+                          title="Color shifts dynamically based on Bass, Mids, and Treble"
+                        >
+                          <Zap className="w-2.5 h-2.5 text-emerald-400" />
+                          Multi-Color Sync
+                        </button>
+
+                        {/* Option 3: Auto RGB Flow */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPaletteMode('rgb');
+                            setLightingMode('auto-rgb');
+                          }}
+                          className={clsx(
+                            "px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer",
+                            lightingMode === 'auto-rgb' && isChromaTheme
                               ? "bg-cyan-500/25 text-cyan-300 border border-cyan-400/40 shadow-sm"
                               : "text-white/50 hover:text-white"
                           )}
@@ -1016,41 +1073,61 @@ export const DynamicIsland: React.FC = () => {
                           <span className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-pink-400 via-cyan-400 to-purple-400" />
                           Auto RGB Flow
                         </button>
-
-                        {/* Option 2: Frequency-Reactive Mode */}
-                        <button
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setPaletteMode('rgb');
-                            setLightingSubMode('frequency');
-                          }}
-                          className={clsx(
-                            "px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer",
-                            lightingSubMode === 'frequency'
-                              ? "bg-emerald-500/25 text-emerald-300 border border-emerald-400/40 shadow-sm"
-                              : "text-white/50 hover:text-white"
-                          )}
-                          title="Lighting colors and border pulse react to Bass, Mids, and Treble"
-                        >
-                          <Zap className="w-2.5 h-2.5 text-emerald-400" />
-                          Frequency Sync
-                        </button>
                       </div>
                     </div>
 
-                    {/* Row 2: Live Real-Time Multi-Band Frequency Spectrum Bars */}
+                    {/* Row 2: Direct Clickable Color Theme Dots (All 8 Colors + Chroma RGB) */}
+                    <div className="flex items-center justify-between px-2 py-1 bg-black/40 rounded-lg border border-white/[0.06]">
+                      <span className="text-[9px] font-mono text-white/50 tracking-wider">THEME COLOR:</span>
+                      <div className="flex items-center gap-2">
+                        {THEME_KEYS.map((key) => {
+                          const conf = THEMES[key];
+                          const isSel = paletteMode === key;
+                          return (
+                            <button
+                              key={key}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setPaletteMode(key);
+                                if (key === 'rgb') {
+                                  setLightingMode('auto-rgb');
+                                } else {
+                                  setLightingMode('single-sync');
+                                }
+                              }}
+                              className={clsx(
+                                "w-4 h-4 rounded-full transition-all relative flex items-center justify-center cursor-pointer",
+                                isSel ? "ring-2 ring-white scale-125" : "opacity-60 hover:opacity-100 hover:scale-110"
+                              )}
+                              title={conf.name}
+                              style={{
+                                backgroundColor: key === 'rgb' ? undefined : conf.color,
+                                background: key === 'rgb' ? 'conic-gradient(from 0deg, #ff0055, #7928ca, #00dfd8, #0070f3, #ff0055)' : undefined
+                              }}
+                            >
+                              {isSel && <span className="w-1 h-1 rounded-full bg-white shadow-sm" />}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <span className="text-[9px] font-semibold text-white/80 truncate max-w-[85px]">
+                        {currentTheme.name.split(' ')[0]}
+                      </span>
+                    </div>
+
+                    {/* Row 3: Live Real-Time Multi-Band Frequency Spectrum Bars */}
                     <div className="grid grid-cols-3 gap-1.5 pt-0.5">
                       {/* Bass (20-250Hz) */}
                       <div className="flex flex-col gap-1 bg-white/[0.03] p-1.5 rounded-lg border border-white/[0.05]">
                         <div className="flex items-center justify-between text-[9px] font-mono">
-                          <span className="text-rose-400 font-bold">BASS</span>
+                          <span className="font-bold" style={{ color: themeColor }}>BASS</span>
                           <span className="text-white/40">{Math.round(audioEnergy.bass * 100)}%</span>
                         </div>
                         <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
                           <div
-                            className="h-full bg-rose-500 rounded-full transition-all duration-75"
-                            style={{ width: `${Math.round(audioEnergy.bass * 100)}%` }}
+                            className="h-full rounded-full transition-all duration-75"
+                            style={{ width: `${Math.round(audioEnergy.bass * 100)}%`, backgroundColor: themeColor }}
                           />
                         </div>
                       </div>

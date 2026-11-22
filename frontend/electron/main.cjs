@@ -205,10 +205,10 @@ function createMainWindow() {
 function createIslandWindow() {
   const primaryDisplay = screen.getPrimaryDisplay();
   const { width: screenWidth } = primaryDisplay.workAreaSize;
-  const islandWidth = 340;
-  const islandHeight = 44;
+  const islandWidth = 440;
+  const islandHeight = 64;
   const islandX = Math.round((screenWidth - islandWidth) / 2);
-  const islandY = 10;
+  const islandY = 8;
 
   islandWindow = new BrowserWindow({
     width: islandWidth,
@@ -473,8 +473,8 @@ ipcMain.on('island-expand', (_event, expanded, customHeight) => {
   const currentY = islandUserY !== null ? islandUserY : 10;
 
   if (expanded) {
-    const targetWidth = 540;
-    const targetHeight = (customHeight || 420) + 24;
+    const targetWidth = 560;
+    const targetHeight = (customHeight || 450) + 40;
     const targetX = Math.round(centerX - (targetWidth / 2));
     isProgrammaticResize = true;
     islandWindow.setBounds({ x: targetX, y: currentY, width: targetWidth, height: targetHeight });
@@ -482,8 +482,8 @@ ipcMain.on('island-expand', (_event, expanded, customHeight) => {
   } else {
     collapseTimeout = setTimeout(() => {
       if (islandWindow && !islandWindow.isDestroyed()) {
-        const targetWidth = 340;
-        const targetHeight = 44;
+        const targetWidth = 440;
+        const targetHeight = 64;
         const targetX = Math.round(centerX - (targetWidth / 2));
         isProgrammaticResize = true;
         islandWindow.setBounds({ x: targetX, y: currentY, width: targetWidth, height: targetHeight });
