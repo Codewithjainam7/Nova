@@ -103,6 +103,7 @@ export const DynamicIsland: React.FC = () => {
   const [replyDraft, setReplyDraft] = useState('');
   const [isEditingReply, setIsEditingReply] = useState(false);
   const [isSendingReply, setIsSendingReply] = useState(false);
+  const [isHeadsUpEngaged, setIsHeadsUpEngaged] = useState(false);
   const [replySuccessMessage, setReplySuccessMessage] = useState<string | null>(null);
   const replyInputRef = useRef<HTMLInputElement>(null);
 
@@ -110,7 +111,11 @@ export const DynamicIsland: React.FC = () => {
     if (activeHeadsUp) {
       setReplyDraft(activeHeadsUp.suggested_reply || '');
       setIsEditingReply(false);
+      setIsHeadsUpEngaged(false);
       setReplySuccessMessage(null);
+    } else {
+      setIsHeadsUpEngaged(false);
+      setIsEditingReply(false);
     }
   }, [activeHeadsUp]);
   
@@ -568,6 +573,7 @@ export const DynamicIsland: React.FC = () => {
         setActiveHeadsUp(null);
         setReplySuccessMessage(null);
         setIsSendingReply(false);
+        setIsHeadsUpEngaged(false);
       }, 1000);
     } catch {
       setReplySuccessMessage("Queued for background delivery ✓");
@@ -575,6 +581,7 @@ export const DynamicIsland: React.FC = () => {
         setActiveHeadsUp(null);
         setReplySuccessMessage(null);
         setIsSendingReply(false);
+        setIsHeadsUpEngaged(false);
       }, 1000);
     }
   }, [activeHeadsUp, replyDraft, isSendingReply, setActiveHeadsUp]);
@@ -590,6 +597,7 @@ export const DynamicIsland: React.FC = () => {
     } catch {}
     setActiveHeadsUp(null);
     setIsEditingReply(false);
+    setIsHeadsUpEngaged(false);
   }, [activeHeadsUp, setActiveHeadsUp]);
 
   const handleSimulateMessage = async () => {
@@ -649,8 +657,9 @@ export const DynamicIsland: React.FC = () => {
   // Keyboard navigation & Heads-Up Interaction
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // 1. Heads-Up Priority Navigation (Enter=Send, Tab=Edit, Esc=Dismiss)
-      if (activeHeadsUp) {
+      // 1. Heads-Up Priority Navigation (ONLY when user has clicked on the Heads-Up card to engage!)
+      // If user is playing a game, keys (Enter, Tab, Esc) will NEVER be hijacked unless the card is clicked.
+      if (activeHeadsUp && (isHeadsUpEngaged || isEditingReply)) {
         if (e.key === 'Enter') {
           e.preventDefault();
           handleSendReply();
@@ -672,16 +681,26 @@ export const DynamicIsland: React.FC = () => {
         }
       }
 
-      if (e.key === 'Escape' || (e.altKey && (e.code === 'Space' || e.key === ' '))) {
+      // 2. Normal Island Hotkeys (Only when Heads-Up is NOT active)
+      if (!activeHeadsUp && (e.key === 'Escape' || (e.altKey && (e.code === 'Space' || e.key === ' ')))) {
         e.preventDefault();
         setExpanded(false);
         setRecentResponse(null);
       }
     };
 
+    const handleWindowBlur = () => {
+      // If user clicks away (e.g. back to game), automatically disengage heads-up keyboard capture
+      setIsHeadsUpEngaged(false);
+    };
+
     window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeHeadsUp, handleSendReply, handleDismissHeadsUp]);
+    window.addEventListener('blur', handleWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+      window.removeEventListener('blur', handleWindowBlur);
+    };
+  }, [activeHeadsUp, isHeadsUpEngaged, isEditingReply, handleSendReply, handleDismissHeadsUp]);
 
   const handleDispatch = async (text: string) => {
     const cmd = text.trim();
@@ -922,7 +941,13 @@ export const DynamicIsland: React.FC = () => {
         {/* ---------------- HEADS-UP QUICK-REPLY CARD (Autonomous Messaging Overlay) ---------------- */}
         {activeHeadsUp && (
           <div
-            className="absolute inset-0 w-full h-full flex flex-col justify-between p-3.5 select-none z-20 bg-[#0a0b10] rounded-[24px] pointer-events-auto transition-[opacity,transform] duration-200"
+            onClick={() => setIsHeadsUpEngaged(true)}
+            className={clsx(
+              "absolute inset-0 w-full h-full flex flex-col justify-between p-3.5 select-none z-20 bg-[#0a0b10] rounded-[24px] pointer-events-auto transition-all duration-200 cursor-default",
+              isHeadsUpEngaged
+                ? "ring-1 ring-emerald-500/50 shadow-lg shadow-emerald-500/10"
+                : "border border-white/[0.08]"
+            )}
             style={{ WebkitAppRegion: 'no-drag' } as any}
           >
             {/* Header: Platform, Contact, Time, Dismiss */}
@@ -945,7 +970,10 @@ export const DynamicIsland: React.FC = () => {
                 <span className="text-[10px] font-mono text-white/40">Just Now</span>
                 <button
                   type="button"
-                  onClick={handleDismissHeadsUp}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleDismissHeadsUp();
+                  }}
                   className="text-white/40 hover:text-white p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
                   title="Dismiss (Esc)"
                 >
@@ -996,12 +1024,14 @@ export const DynamicIsland: React.FC = () => {
                 </div>
               ) : (
                 <div
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsHeadsUpEngaged(true);
                     setIsEditingReply(true);
                     setTimeout(() => replyInputRef.current?.focus({ preventScroll: true }), 60);
                   }}
                   className="group px-3 py-1.5 rounded-xl bg-emerald-500/[0.08] hover:bg-emerald-500/[0.14] border border-emerald-500/20 hover:border-emerald-500/40 transition-all cursor-pointer flex items-center justify-between"
-                  title="Click or press Tab to edit"
+                  title="Click to edit custom reply"
                 >
                   <div className="flex-1 pr-2">
                     <div className="flex items-center gap-1 text-[9px] font-mono text-emerald-400 font-semibold mb-0.5">
@@ -1011,7 +1041,7 @@ export const DynamicIsland: React.FC = () => {
                     <div className="text-[12px] text-emerald-100 font-medium truncate">{replyDraft}</div>
                   </div>
                   <span className="text-[9px] text-white/40 group-hover:text-emerald-300 font-mono shrink-0 border border-white/10 px-1.5 py-0.5 rounded">
-                    Tab to Edit
+                    Click to Edit
                   </span>
                 </div>
               )}
@@ -1022,18 +1052,28 @@ export const DynamicIsland: React.FC = () => {
               <div className="flex items-center gap-1.5">
                 <button
                   type="button"
-                  onClick={handleSendReply}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleSendReply();
+                  }}
                   disabled={isSendingReply}
                   className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-500/40 text-emerald-300 text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-emerald-500/20"
                 >
                   <CornerDownLeft className="w-3 h-3 text-emerald-300" />
                   <span>Send</span>
-                  <kbd className="text-[9px] font-mono bg-black/40 px-1 py-0.2 rounded text-emerald-400 border border-emerald-500/30">Enter</kbd>
+                  <kbd className={clsx(
+                    "text-[9px] font-mono px-1 py-0.2 rounded border transition-colors",
+                    (isHeadsUpEngaged || isEditingReply)
+                      ? "bg-emerald-500/30 text-emerald-300 border-emerald-500/50"
+                      : "bg-black/40 text-white/40 border-white/10"
+                  )}>Enter</kbd>
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => {
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setIsHeadsUpEngaged(true);
                     setIsEditingReply((prev) => {
                       const next = !prev;
                       if (next) setTimeout(() => replyInputRef.current?.focus({ preventScroll: true }), 60);
@@ -1049,18 +1089,37 @@ export const DynamicIsland: React.FC = () => {
                 >
                   <Edit3 className="w-3 h-3" />
                   <span>{isEditingReply ? "Done" : "Edit"}</span>
-                  <kbd className="text-[9px] font-mono bg-black/40 px-1 py-0.2 rounded text-white/50 border border-white/10">Tab</kbd>
+                  <kbd className={clsx(
+                    "text-[9px] font-mono px-1 py-0.2 rounded border transition-colors",
+                    (isHeadsUpEngaged || isEditingReply)
+                      ? "bg-white/20 text-white border-white/30"
+                      : "bg-black/40 text-white/40 border-white/10"
+                  )}>Tab</kbd>
                 </button>
               </div>
 
+              {!isHeadsUpEngaged && !isEditingReply && (
+                <span className="text-[10px] text-white/40 font-mono tracking-wide hidden sm:inline">
+                  Click card to type
+                </span>
+              )}
+
               <button
                 type="button"
-                onClick={handleDismissHeadsUp}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDismissHeadsUp();
+                }}
                 className="px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-rose-500/15 border border-white/[0.08] hover:border-rose-500/30 text-white/50 hover:text-rose-300 text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ml-auto"
               >
                 <X className="w-3 h-3" />
                 <span>Ignore</span>
-                <kbd className="text-[9px] font-mono bg-black/40 px-1 py-0.2 rounded text-white/40 border border-white/10">Esc</kbd>
+                <kbd className={clsx(
+                  "text-[9px] font-mono px-1 py-0.2 rounded border transition-colors",
+                  (isHeadsUpEngaged || isEditingReply)
+                    ? "bg-rose-500/20 text-rose-300 border-rose-500/30"
+                    : "bg-black/40 text-white/40 border-white/10"
+                )}>Esc</kbd>
               </button>
             </div>
           </div>
