@@ -74,12 +74,14 @@ class CloudflareTunnelManager:
                 app_logger.info(f"[CloudflareTunnel] Starting tunnel: {' '.join(cmd)}")
                 
                 # Cloudflare outputs the trycloudflare URL to stderr
+                creationflags = 0x08000000 if sys.platform == "win32" else 0
                 self.process = subprocess.Popen(
                     cmd,
                     stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE,
                     text=True,
-                    bufsize=1
+                    bufsize=1,
+                    creationflags=creationflags
                 )
                 
                 # Monitor stderr for the public URL

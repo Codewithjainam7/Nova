@@ -1,11 +1,21 @@
 import asyncio
 import time
 import json
+import sys
+import subprocess
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Response, Request
 from fastapi.middleware.cors import CORSMiddleware
 from typing import Optional, Dict, Any, List
 from pydantic import BaseModel
+
+# Globally guarantee that any subprocess invoked on Windows runs with CREATE_NO_WINDOW
+_orig_subprocess_run = subprocess.run
+def _silent_subprocess_run(cmd, *args, **kwargs):
+    if sys.platform == 'win32' and 'creationflags' not in kwargs:
+        kwargs['creationflags'] = 0x08000000
+    return _orig_subprocess_run(cmd, *args, **kwargs)
+subprocess.run = _silent_subprocess_run
 
 from backend.settings.core import SettingsSystem
 from backend.kernel.core import NovaKernel, KernelLogger
@@ -145,29 +155,6 @@ async def lifespan(app: FastAPI):
     except Exception as e:
         app_logger.error(f"Failed to start Wake Word Engine: {e}")
 
-    # Start Autonomous Call Screening Telephony Guardian
-    try:
-        from backend.devices.call_screening import call_screener
-        loop_cs = asyncio.get_running_loop()
-
-        def _on_call_event(event_data: dict):
-            try:
-                asyncio.run_coroutine_threadsafe(
-                    events_ws_manager.broadcast(json.dumps({
-                        "type": "CALL_SCREENING_EVENT",
-                        **event_data
-                    })),
-                    loop_cs
-                )
-            except Exception as ce:
-                app_logger.debug(f"Call event broadcast notice: {ce}")
-
-        call_screener.register_callback(_on_call_event)
-        app.state.call_screen_task = asyncio.create_task(call_screener.start_monitoring())
-        app_logger.info("Autonomous Mobile Telephony Guardian initialized.")
-    except Exception as e:
-        app_logger.error(f"Failed to start Call Screening: {e}")
-    
     app_logger.info(f"ADA Runtime Successfully Booted in {(time.time() - boot_time) * 1000:.2f}ms")
     app_logger.info(f"Loaded Modules: SettingsSystem, NovaKernel, EventBus, ChatSystem, ProviderManager, AutoADB")
     app_logger.info(f"Version: 1.0.0, Environment: Production")
@@ -197,13 +184,6 @@ async def lifespan(app: FastAPI):
     try:
         if hasattr(app.state, "wake_service") and app.state.wake_service:
             app.state.wake_service.stop()
-    except Exception:
-        pass
-    try:
-        if hasattr(app.state, "call_screen_task"):
-            from backend.devices.call_screening import call_screener
-            call_screener.stop_monitoring()
-            app.state.call_screen_task.cancel()
     except Exception:
         pass
     await kernel.shutdown()
@@ -918,38 +898,6 @@ async def toggle_wake_status():
             wake_service.start()
         return wake_service.status()
     return {"running": False}
-
-@app.get("/api/devices/call-screening/status")
-async def get_call_screening_status():
-    from backend.devices.call_screening import call_screener
-    return {
-        "enabled": call_screener.enabled,
-        "is_monitoring": call_screener.is_monitoring,
-        "unattended_seconds": call_screener.unattended_seconds,
-        "current_call_state": call_screener.current_state,
-        "active_caller": call_screener.active_caller_name
-    }
-
-@app.post("/api/devices/call-screening/toggle")
-async def toggle_call_screening():
-    from backend.devices.call_screening import call_screener
-    call_screener.enabled = not call_screener.enabled
-    return {
-        "enabled": call_screener.enabled,
-        "status": "ACTIVE" if call_screener.enabled else "STANDBY"
-    }
-
-@app.get("/api/devices/call-screening/logs")
-async def get_call_screening_logs():
-    from backend.devices.call_screening import call_screener
-    records = []
-    if os.path.exists(call_screener.log_file):
-        try:
-            with open(call_screener.log_file, "r", encoding="utf-8") as f:
-                records = json.load(f)
-        except Exception:
-            records = []
-    return {"logs": records}
 
 # -------------------------------------------------------------
 # Autonomous Messaging Hub & Dynamic Island Heads-Up Quick-Reply

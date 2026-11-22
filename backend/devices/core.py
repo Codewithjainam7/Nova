@@ -1,9 +1,18 @@
 import json
 import os
+import sys
 import time
 import subprocess
 from typing import Dict, Any, Optional
 from backend.core.logger import app_logger
+
+# Ensure all ADB and device commands run completely silent without flashing a console window on Windows
+_orig_subprocess_run = subprocess.run
+def _silent_subprocess_run(cmd, *args, **kwargs):
+    if sys.platform == 'win32' and 'creationflags' not in kwargs:
+        kwargs['creationflags'] = 0x08000000
+    return _orig_subprocess_run(cmd, *args, **kwargs)
+subprocess.run = _silent_subprocess_run
 
 class DeviceManager:
     """Manages connections and commands to external devices (like Android phones via ADB)."""
@@ -633,21 +642,6 @@ class DeviceManager:
         if intent == "get_battery":
             level = self.get_battery_level(target)
             return f"Your phone battery is currently at {level}."
-            
-        if intent in ["enable_call_screening", "start_call_screening", "screen_calls"]:
-            from backend.devices.call_screening import call_screener
-            call_screener.enabled = True
-            return "Autonomous Call Screening is now ACTIVE. When an incoming call rings unattended for over 12 seconds, ADA will automatically answer, engage speakerphone, and screen the call for you."
-
-        if intent in ["disable_call_screening", "stop_call_screening"]:
-            from backend.devices.call_screening import call_screener
-            call_screener.enabled = False
-            return "Autonomous Call Screening is now DISABLED. ADA will not auto-answer incoming phone calls."
-
-        if intent in ["get_call_screening_status", "call_screening_status", "check_call_screening"]:
-            from backend.devices.call_screening import call_screener
-            status_str = "ACTIVE" if call_screener.enabled else "STANDBY"
-            return f"Autonomous Call Screening is currently {status_str}. Unattended ring threshold: {call_screener.unattended_seconds} seconds."
             
         if intent == "open_app":
             if not entity:

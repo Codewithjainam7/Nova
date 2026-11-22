@@ -407,29 +407,6 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
                 tasks=[task]
             )
 
-        # 0.045. Instant Autonomous Call Screening Fast-Path (<20ms)
-        if any(k in q for k in ["screen my calls", "screen calls", "answer my calls", "pick up calls", "pick up call", "call screening", "screen call"]):
-            is_disable = any(k in q for k in ["disable", "turn off", "stop", "deactivate"])
-            is_status = any(k in q for k in ["status", "check", "is ", "how"])
-            intent_val = "disable_call_screening" if is_disable else "get_call_screening_status" if is_status else "enable_call_screening"
-            task = Task(
-                task_id=str(uuid.uuid4()),
-                description="Manage Autonomous Call Screening",
-                required_tools=["device"],
-                risk=RiskLevel.LOW,
-                action_metadata={
-                    "app": "phone",
-                    "intent": intent_val,
-                    "entity": ""
-                }
-            )
-            return Plan(
-                plan_id=str(uuid.uuid4()),
-                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query),
-                goal=Goal(primary_goal="Manage call screening"),
-                tasks=[task]
-            )
-
         # 0.05. Instant Sleep Laptop Fast-Path (<10ms)
         if any(k in q for k in ["sleep laptop", "sleep pc", "put laptop to sleep", "sleep my laptop", "suspend laptop"]):
             task = Task(
