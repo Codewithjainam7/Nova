@@ -641,7 +641,7 @@ export const DynamicIsland: React.FC = () => {
         className={clsx(
           "pointer-events-auto overflow-hidden relative flex flex-col justify-start",
           "border transition-all duration-150",
-          expanded ? "shadow-none" : "hover:border-white/40 cursor-pointer",
+          expanded ? "shadow-none rounded-2xl" : "hover:border-white/40 cursor-pointer rounded-full",
           "bg-[#0a0b10] text-white", // Solid OLED Dark
         )}
         style={{
@@ -852,14 +852,20 @@ export const DynamicIsland: React.FC = () => {
                   <RotateCcw className="w-3 h-3" />
                 </button>
 
-                {/* Accent Palette (Cycles through 8 vibrant color themes) */}
+                {/* Accent Palette (Cycles through all 9 color themes) */}
                 <button
                   type="button"
                   onClick={(e) => {
                     e.stopPropagation();
                     setPaletteMode(prev => {
                       const idx = THEME_KEYS.indexOf(prev);
-                      return THEME_KEYS[(idx + 1) % THEME_KEYS.length];
+                      const next = THEME_KEYS[(idx + 1) % THEME_KEYS.length];
+                      if (next === 'rgb') {
+                        setLightingMode('auto-rgb');
+                      } else {
+                        setLightingMode(lm => (lm === 'spectrum-sync' || lm === 'auto-rgb') ? 'single-sync' : lm);
+                      }
+                      return next;
                     });
                   }}
                   className="p-1.5 rounded-full bg-white/[0.07] hover:bg-white/[0.14] text-white/70 hover:text-white transition-all cursor-pointer flex items-center gap-1.5"
@@ -868,8 +874,8 @@ export const DynamicIsland: React.FC = () => {
                   <span
                     className="w-2 h-2 rounded-full border border-white/40 shadow-sm"
                     style={{
-                      backgroundColor: isRgbMode ? dynamicRgbColor : currentTheme.color,
-                      background: isRgbMode ? `conic-gradient(from ${rgbAngle}deg, #ff0055, #7928ca, #00dfd8, #0070f3, #ff0055)` : undefined
+                      backgroundColor: isChromaTheme ? themeColor : currentTheme.color,
+                      background: isChromaTheme ? `conic-gradient(from ${rgbAngle}deg, #ff0055, #7928ca, #00dfd8, #0070f3, #ff0055)` : undefined
                     }}
                   />
                   <Palette className="w-3 h-3" />

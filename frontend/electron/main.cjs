@@ -3,6 +3,13 @@ const path = require('path');
 const http = require('http');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const logFilePath = path.join(__dirname, '../../electron_console.log');
+function diskLog(tag, msg) {
+  try {
+    const line = `[${new Date().toISOString()}] [${tag}] ${typeof msg === 'object' ? JSON.stringify(msg) : msg}\n`;
+    fs.appendFileSync(logFilePath, line);
+  } catch (e) {}
+}
 
 // Prevent EPIPE crashes when launched from detached or closed CLI pipes
 if (process.stdout) {
@@ -18,6 +25,7 @@ if (process.stderr) {
 process.on('uncaughtException', (err) => {
   if (err && err.code === 'EPIPE') return;
   console.error('[Electron Uncaught Exception]:', err);
+  diskLog('UncaughtException', err && err.stack ? err.stack : err);
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[Electron Unhandled Rejection]:', reason);
@@ -101,29 +109,41 @@ function loadWindowContent(targetWindow, queryParam = '') {
   const queryStr = queryParam ? (queryParam.startsWith('?') ? queryParam : `?${queryParam}`) : '';
   const devUrl = `${FRONTEND_URL}${queryStr}`;
 
-  http.get(FRONTEND_URL, (res) => {
-    if (res.statusCode === 200) {
-      targetWindow.loadURL(devUrl).catch(() => {
-        if (hasDist) {
-          targetWindow.loadFile(distIndex, { search: queryParam.replace(/^\?/, '') });
-        }
-      });
-    } else {
-      if (hasDist) {
-        targetWindow.loadFile(distIndex, { search: queryParam.replace(/^\?/, '') });
-      } else {
-        targetWindow.loadURL(devUrl).catch(() => {});
-      }
-    }
-    res.resume();
-  }).on('error', () => {
+  let handled = false;
+  const loadFallback = () => {
+    if (handled) return;
+    handled = true;
     if (hasDist) {
-      console.log(`[Electron] Dev server offline, loading pre-built bundle from ${distIndex}`);
+      console.log(`[Electron] Dev server offline/timed out, loading pre-built bundle from ${distIndex}`);
       targetWindow.loadFile(distIndex, { search: queryParam.replace(/^\?/, '') });
     } else {
       targetWindow.loadURL(devUrl).catch(() => {});
     }
-  });
+  };
+
+  try {
+    const req = http.get(FRONTEND_URL, (res) => {
+      if (handled) return;
+      handled = true;
+      if (res.statusCode === 200) {
+        targetWindow.loadURL(devUrl).catch(() => loadFallback());
+      } else {
+        loadFallback();
+      }
+      res.resume();
+    });
+
+    req.setTimeout(800, () => {
+      req.destroy();
+      loadFallback();
+    });
+
+    req.on('error', () => {
+      loadFallback();
+    });
+  } catch (err) {
+    loadFallback();
+  }
 }
 
 function showMainWindow() {
@@ -240,10 +260,12 @@ function createIslandWindow() {
 
   islandWindow.webContents.on('did-finish-load', () => {
     console.log('[Electron] islandWindow did-finish-load! URL:', islandWindow.webContents.getURL());
+    diskLog('IslandLife', `did-finish-load: ${islandWindow.webContents.getURL()}`);
   });
 
   islandWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
     console.log(`[IslandWindow Console] (${level}) ${message} [${sourceId}:${line}]`);
+    diskLog('IslandConsole', `(${level}) ${message} [${sourceId}:${line}]`);
   });
 
   islandWindow.webContents.on('did-fail-load', (_event, errorCode, errorDescription) => {
