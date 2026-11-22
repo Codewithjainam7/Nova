@@ -496,11 +496,11 @@ ipcMain.on('island-expand', (_event, expanded, customHeight) => {
 
   if (expanded) {
     const targetWidth = 560;
-    const targetHeight = (customHeight || 450) + 40;
+    const targetHeight = (customHeight || 485) + 36;
     const targetX = Math.round(centerX - (targetWidth / 2));
     isProgrammaticResize = true;
     islandWindow.setBounds({ x: targetX, y: currentY, width: targetWidth, height: targetHeight });
-    setTimeout(() => { isProgrammaticResize = false; }, 80);
+    setTimeout(() => { isProgrammaticResize = false; }, 40);
   } else {
     collapseTimeout = setTimeout(() => {
       if (islandWindow && !islandWindow.isDestroyed()) {
@@ -509,9 +509,9 @@ ipcMain.on('island-expand', (_event, expanded, customHeight) => {
         const targetX = Math.round(centerX - (targetWidth / 2));
         isProgrammaticResize = true;
         islandWindow.setBounds({ x: targetX, y: currentY, width: targetWidth, height: targetHeight });
-        setTimeout(() => { isProgrammaticResize = false; }, 80);
+        setTimeout(() => { isProgrammaticResize = false; }, 40);
       }
-    }, 290);
+    }, 220);
   }
 });
 

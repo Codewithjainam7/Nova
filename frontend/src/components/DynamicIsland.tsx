@@ -115,10 +115,11 @@ export const DynamicIsland: React.FC = () => {
   });
   const animFrameRef = useRef<number>(0);
 
-  // Real-Time 60 FPS Audio-Reactive Frequency Synthesizer & Dynamic RGB Chroma Rotator
+  // Real-Time Audio-Reactive Frequency Synthesizer & Dynamic RGB Chroma Rotator
   useEffect(() => {
     let currentAngle = 0;
     let lastTime = performance.now();
+    let lastStateUpdateTime = 0;
 
     const loop = (now: number) => {
       const delta = Math.min((now - lastTime) / 1000, 0.1);
@@ -126,34 +127,47 @@ export const DynamicIsland: React.FC = () => {
 
       const isPlaying = currentMedia?.status === 'playing';
 
+      let rawBass = 0;
+      let rawMid = 0;
+      let rawTreble = 0;
+
       if (isPlaying) {
         const t = now / 1000;
         // Rhythmically pulsing bass (~128 BPM base with sub-bass harmonics)
         const beat = Math.sin(t * 8.2) * 0.7 + Math.sin(t * 4.1) * 0.3;
-        const rawBass = Math.max(0, Math.pow((beat + 1) / 2, 2.5));
+        rawBass = Math.max(0, Math.pow((beat + 1) / 2, 2.5));
 
         // Mid harmonic melodic flow
-        const rawMid = (Math.sin(t * 5.4) + Math.cos(t * 3.2) + 2) / 4;
+        const rawMidValue = (Math.sin(t * 5.4) + Math.cos(t * 3.2) + 2) / 4;
+        rawMid = rawMidValue;
 
         // Treble shimmer
-        const rawTreble = Math.abs(Math.sin(t * 11.0 + Math.cos(t * 16.0)));
-
-        setAudioEnergy({
-          bass: Math.min(1, rawBass),
-          mid: Math.min(1, rawMid),
-          treble: Math.min(1, rawTreble)
-        });
+        rawTreble = Math.abs(Math.sin(t * 11.0 + Math.cos(t * 16.0)));
 
         // Rotation speed increases dynamically with audio energy
         const speed = 40 + rawMid * 50 + rawBass * 30; // deg/sec
         currentAngle = (currentAngle + speed * delta) % 360;
       } else {
-        setAudioEnergy({ bass: 0, mid: 0, treble: 0 });
         // Smooth ambient rotation when idle
         currentAngle = (currentAngle + 18 * delta) % 360;
       }
 
-      setRgbAngle(Math.round(currentAngle));
+      // Throttle React state updates to ~30 FPS (33ms) so React doesn't re-render 60 times a second
+      // This leaves 100% GPU/CPU budget for silky-smooth 60fps expand/collapse animations
+      if (now - lastStateUpdateTime >= 33) {
+        lastStateUpdateTime = now;
+        setRgbAngle(Math.round(currentAngle));
+        if (isPlaying) {
+          setAudioEnergy({
+            bass: Math.min(1, rawBass),
+            mid: Math.min(1, rawMid),
+            treble: Math.min(1, rawTreble)
+          });
+        } else {
+          setAudioEnergy({ bass: 0, mid: 0, treble: 0 });
+        }
+      }
+
       animFrameRef.current = requestAnimationFrame(loop);
     };
 
@@ -491,7 +505,7 @@ export const DynamicIsland: React.FC = () => {
   };
 
   // Expanded height: Generous clearance so no element or border is ever clipped
-  const expandedHeight = activeTab === 'gaming' ? 440 : (currentMedia && currentMedia.title ? 425 : 330);
+  const expandedHeight = activeTab === 'gaming' ? 460 : (currentMedia && currentMedia.title ? 485 : 360);
 
   // Inform Electron of dynamic bounds
   useEffect(() => {
@@ -630,18 +644,16 @@ export const DynamicIsland: React.FC = () => {
           opacity: 1,
           width: expanded ? 516 : (currentMedia ? 356 : 240),
           height: expanded ? expandedHeight : 44,
-          borderRadius: expanded ? 16 : 22
+          borderRadius: expanded ? 26 : 22
         }}
         transition={{
-          type: "spring",
-          stiffness: 300,
-          damping: 28,
-          mass: 0.8
+          duration: 0.22,
+          ease: [0.16, 1, 0.3, 1]
         }}
         className={clsx(
           "pointer-events-auto overflow-hidden relative flex flex-col justify-start",
           "border transition-all duration-150",
-          expanded ? "shadow-none rounded-2xl" : "hover:border-white/40 cursor-pointer rounded-full",
+          expanded ? "shadow-none rounded-[26px]" : "hover:border-white/40 cursor-pointer rounded-full",
           "bg-[#0a0b10] text-white", // Solid OLED Dark
         )}
         style={{
@@ -1011,7 +1023,7 @@ export const DynamicIsland: React.FC = () => {
                   </div>
 
                   {/* ---------------- LIVE LIGHTING & FREQUENCY SPECTRUM HUD ---------------- */}
-                  <div className="w-full mt-1.5 p-2 rounded-xl bg-white/[0.04] border border-white/[0.08] flex flex-col gap-2">
+                  <div className="w-full mt-1 p-2 rounded-xl bg-white/[0.04] border border-white/[0.08] flex flex-col gap-2">
                     {/* Row 1: Lighting Mode Selector */}
                     <div className="flex items-center justify-between">
                       <div className="flex items-center gap-1.5 text-[10px] font-semibold text-white/60 tracking-wider">
@@ -1031,12 +1043,17 @@ export const DynamicIsland: React.FC = () => {
                           className={clsx(
                             "px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer",
                             lightingMode === 'single-sync' && !isChromaTheme
-                              ? "bg-rose-500/25 text-rose-300 border border-rose-400/40 shadow-sm"
+                              ? "shadow-sm border"
                               : "text-white/50 hover:text-white"
                           )}
-                          title="Sync music frequencies using your chosen color"
+                          style={
+                            lightingMode === 'single-sync' && !isChromaTheme
+                              ? { backgroundColor: `${themeColor}25`, borderColor: `${themeColor}60`, color: themeColor }
+                              : undefined
+                          }
+                          title="Sync music frequencies using your chosen single color"
                         >
-                          <Zap className="w-2.5 h-2.5 text-rose-400" />
+                          <Zap className="w-2.5 h-2.5" style={{ color: lightingMode === 'single-sync' && !isChromaTheme ? themeColor : undefined }} />
                           Single Color Sync
                         </button>
 
@@ -1082,10 +1099,15 @@ export const DynamicIsland: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Row 2: Direct Clickable Color Theme Dots (All 8 Colors + Chroma RGB) */}
-                    <div className="flex items-center justify-between px-2 py-1 bg-black/40 rounded-lg border border-white/[0.06]">
-                      <span className="text-[9px] font-mono text-white/50 tracking-wider">THEME COLOR:</span>
-                      <div className="flex items-center gap-2">
+                    {/* Row 2: Direct Clickable Color Theme Dots (All 8 Solid Colors + Chroma RGB) */}
+                    <div className="flex items-center justify-between px-2.5 py-1.5 bg-black/50 rounded-xl border border-white/[0.08]">
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[9px] font-mono text-white/60 tracking-wider font-semibold">THEME COLOR:</span>
+                        <span className="text-[10px] font-semibold text-white/90 truncate max-w-[90px]">
+                          {currentTheme.name.split(' ')[0]}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 shrink-0">
                         {THEME_KEYS.map((key) => {
                           const conf = THEMES[key];
                           const isSel = paletteMode === key;
@@ -1103,23 +1125,21 @@ export const DynamicIsland: React.FC = () => {
                                 }
                               }}
                               className={clsx(
-                                "w-4 h-4 rounded-full transition-all relative flex items-center justify-center cursor-pointer",
-                                isSel ? "ring-2 ring-white scale-125" : "opacity-60 hover:opacity-100 hover:scale-110"
+                                "shrink-0 w-4 h-4 rounded-full border border-white/30 transition-transform cursor-pointer relative flex items-center justify-center",
+                                isSel ? "ring-2 ring-white scale-125 z-10" : "opacity-75 hover:opacity-100 hover:scale-110"
                               )}
                               title={conf.name}
                               style={{
-                                backgroundColor: key === 'rgb' ? undefined : conf.color,
-                                background: key === 'rgb' ? 'conic-gradient(from 0deg, #ff0055, #7928ca, #00dfd8, #0070f3, #ff0055)' : undefined
+                                background: key === 'rgb'
+                                  ? 'conic-gradient(from 0deg, #ff0055, #7928ca, #00dfd8, #0070f3, #ff0055)'
+                                  : conf.color
                               }}
                             >
-                              {isSel && <span className="w-1 h-1 rounded-full bg-white shadow-sm" />}
+                              {isSel && <span className="w-1.5 h-1.5 rounded-full bg-white shadow" />}
                             </button>
                           );
                         })}
                       </div>
-                      <span className="text-[9px] font-semibold text-white/80 truncate max-w-[85px]">
-                        {currentTheme.name.split(' ')[0]}
-                      </span>
                     </div>
 
                     {/* Row 3: Live Real-Time Multi-Band Frequency Spectrum Bars */}
