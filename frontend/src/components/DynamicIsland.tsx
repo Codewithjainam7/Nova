@@ -638,9 +638,7 @@ export const DynamicIsland: React.FC = () => {
         } else if (action === 'collapse') {
           setExpanded(false);
           setRecentResponse(null);
-          if (activeHeadsUp) {
-            handleDismissHeadsUp();
-          }
+          // Ambient Heads-Up: Never dismiss on window blur so user can read message while gaming/coding!
         }
       });
     }
