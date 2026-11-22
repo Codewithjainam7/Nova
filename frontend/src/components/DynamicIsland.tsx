@@ -64,7 +64,7 @@ interface MediaTrack {
 
 type IslandTab = 'music' | 'gaming';
 
-export type PaletteThemeKey = 'pink' | 'cyan' | 'purple' | 'emerald' | 'amber' | 'orange' | 'crimson' | 'silver';
+export type PaletteThemeKey = 'rgb' | 'pink' | 'cyan' | 'purple' | 'emerald' | 'amber' | 'orange' | 'crimson' | 'silver';
 
 export interface ThemeConfig {
   key: PaletteThemeKey;
@@ -74,6 +74,7 @@ export interface ThemeConfig {
 }
 
 export const THEMES: Record<PaletteThemeKey, ThemeConfig> = {
+  rgb: { key: 'rgb', name: 'Chroma RGB Wave', color: '#00dfd8', accentClass: 'text-cyan-400' },
   pink: { key: 'pink', name: 'Sakura Pink', color: '#f472b6', accentClass: 'text-rose-400' },
   cyan: { key: 'cyan', name: 'Cyber Cyan', color: '#22d3ee', accentClass: 'text-cyan-400' },
   purple: { key: 'purple', name: 'Electric Violet', color: '#a855f7', accentClass: 'text-purple-400' },
@@ -84,7 +85,7 @@ export const THEMES: Record<PaletteThemeKey, ThemeConfig> = {
   silver: { key: 'silver', name: 'Ice Titanium', color: '#e2e8f0', accentClass: 'text-slate-200' },
 };
 
-export const THEME_KEYS: PaletteThemeKey[] = ['pink', 'cyan', 'purple', 'emerald', 'amber', 'orange', 'crimson', 'silver'];
+export const THEME_KEYS: PaletteThemeKey[] = ['rgb', 'pink', 'cyan', 'purple', 'emerald', 'amber', 'orange', 'crimson', 'silver'];
 
 export const DynamicIsland: React.FC = () => {
   const { islandState, setIslandState } = useNovaStore();
@@ -95,7 +96,60 @@ export const DynamicIsland: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [recentResponse, setRecentResponse] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState('');
-  const [paletteMode, setPaletteMode] = useState<PaletteThemeKey>('pink');
+  const [paletteMode, setPaletteMode] = useState<PaletteThemeKey>('rgb');
+  const [rgbAngle, setRgbAngle] = useState<number>(0);
+  const [audioEnergy, setAudioEnergy] = useState<{ bass: number; mid: number; treble: number }>({
+    bass: 0,
+    mid: 0,
+    treble: 0
+  });
+  const animFrameRef = useRef<number>(0);
+
+  // Real-Time 60 FPS Audio-Reactive Frequency Synthesizer & Dynamic RGB Chroma Rotator
+  useEffect(() => {
+    let currentAngle = 0;
+    let lastTime = performance.now();
+
+    const loop = (now: number) => {
+      const delta = Math.min((now - lastTime) / 1000, 0.1);
+      lastTime = now;
+
+      const isPlaying = currentMedia?.status === 'playing';
+
+      if (isPlaying) {
+        const t = now / 1000;
+        // Rhythmically pulsing bass (~128 BPM base with sub-bass harmonics)
+        const beat = Math.sin(t * 8.2) * 0.7 + Math.sin(t * 4.1) * 0.3;
+        const rawBass = Math.max(0, Math.pow((beat + 1) / 2, 2.5));
+
+        // Mid harmonic melodic flow
+        const rawMid = (Math.sin(t * 5.4) + Math.cos(t * 3.2) + 2) / 4;
+
+        // Treble shimmer
+        const rawTreble = Math.abs(Math.sin(t * 11.0 + Math.cos(t * 16.0)));
+
+        setAudioEnergy({
+          bass: Math.min(1, rawBass),
+          mid: Math.min(1, rawMid),
+          treble: Math.min(1, rawTreble)
+        });
+
+        // Rotation speed increases dynamically with audio energy
+        const speed = 40 + rawMid * 50 + rawBass * 30; // deg/sec
+        currentAngle = (currentAngle + speed * delta) % 360;
+      } else {
+        setAudioEnergy({ bass: 0, mid: 0, treble: 0 });
+        // Smooth ambient rotation when idle
+        currentAngle = (currentAngle + 18 * delta) % 360;
+      }
+
+      setRgbAngle(Math.round(currentAngle));
+      animFrameRef.current = requestAnimationFrame(loop);
+    };
+
+    animFrameRef.current = requestAnimationFrame(loop);
+    return () => cancelAnimationFrame(animFrameRef.current);
+  }, [currentMedia?.status]);
   const [isPinned, setIsPinned] = useState(false);
   
   // Media State & High-Precision Audio Sync Clock
@@ -533,9 +587,11 @@ export const DynamicIsland: React.FC = () => {
   };
 
   const isVoiceActive = islandState === 'voice-listening' || isListening;
-  const currentTheme = THEMES[paletteMode] || THEMES.pink;
-  const themeColor = currentTheme.color;
-  const themeAccentClass = currentTheme.accentClass;
+  const isRgbMode = paletteMode === 'rgb';
+  const dynamicRgbColor = isRgbMode ? `hsl(${rgbAngle}, 100%, 65%)` : null;
+  const currentTheme = THEMES[paletteMode] || THEMES.rgb;
+  const themeColor = dynamicRgbColor || currentTheme.color;
+  const themeAccentClass = isRgbMode ? 'text-cyan-400' : currentTheme.accentClass;
 
   return (
     <div className="fixed top-0 left-0 w-full flex justify-center pointer-events-none z-[999999] select-none font-sans">
@@ -544,7 +600,7 @@ export const DynamicIsland: React.FC = () => {
         animate={{
           y: 0,
           opacity: 1,
-          width: expanded ? 516 : (currentMedia ? 336 : 240),
+          width: expanded ? 516 : (currentMedia ? 356 : 240),
           height: expanded ? expandedHeight : 44,
           borderRadius: expanded ? 14 : 22
         }}
@@ -556,25 +612,36 @@ export const DynamicIsland: React.FC = () => {
         }}
         className={clsx(
           "pointer-events-auto overflow-hidden relative flex flex-col justify-start",
-          "border border-white/15",
-          expanded ? "border-white/20 shadow-none" : "shadow-none hover:border-white/30 transition-colors cursor-pointer",
+          "border transition-colors duration-150",
+          expanded ? "shadow-none" : "shadow-none hover:border-white/40 cursor-pointer",
           "bg-[#0a0b10] text-white", // Solid OLED Dark
         )}
-        style={{ transformOrigin: "top center" }}
+        style={{
+          transformOrigin: "top center",
+          borderColor: isRgbMode
+            ? `hsl(${rgbAngle}, 100%, 65%, ${0.35 + (currentMedia?.status === 'playing' ? audioEnergy.bass * 0.45 : 0)})`
+            : (currentMedia?.status === 'playing' ? `${themeColor}60` : 'rgba(255, 255, 255, 0.15)'),
+          boxShadow: isRgbMode
+            ? `0 0 ${10 + (currentMedia?.status === 'playing' ? audioEnergy.bass * 18 : 2)}px hsl(${rgbAngle}, 95%, 55%, ${0.25 + (currentMedia?.status === 'playing' ? audioEnergy.bass * 0.4 : 0.08)})`
+            : (currentMedia?.status === 'playing' ? `0 0 ${8 + audioEnergy.bass * 12}px ${themeColor}40` : undefined)
+        }}
         onClick={() => !expanded && setExpanded(true)}
       >
-        {/* Apple Style Smooth Radial Glow Accent (Pure vector gradient, zero blur filter bleeding) */}
+        {/* Apple Style Smooth Radial Glow Accent */}
         <div
-          className="absolute top-0 left-0 right-0 h-20 pointer-events-none opacity-20 transition-opacity duration-500 z-0"
+          className="absolute top-0 left-0 right-0 h-24 pointer-events-none transition-opacity duration-300 z-0"
           style={{
-            background: `radial-gradient(ellipse 80% 50% at 50% 0%, ${themeColor} 0%, transparent 100%)`
+            opacity: currentMedia?.status === 'playing' ? 0.28 + audioEnergy.bass * 0.22 : 0.18,
+            background: isRgbMode
+              ? `radial-gradient(ellipse 90% 60% at 50% 0%, hsl(${rgbAngle}, 100%, 60%) 0%, transparent 100%)`
+              : `radial-gradient(ellipse 80% 50% at 50% 0%, ${themeColor} 0%, transparent 100%)`
           }}
         />
 
         {/* ---------------- COLLAPSED PILL STATE (Fluid absolute overlay) ---------------- */}
         <div
           className={clsx(
-            "w-full h-11 px-3 flex items-center justify-between gap-2 select-none absolute top-0 left-0 z-10",
+            "w-full h-11 px-4 flex items-center justify-between gap-2.5 select-none absolute top-0 left-0 z-10",
             "transition-[opacity,transform] duration-200 ease-out",
             expanded
               ? "opacity-0 pointer-events-none scale-95"
@@ -584,11 +651,11 @@ export const DynamicIsland: React.FC = () => {
             {/* Movable Drag Grip on Left */}
             <div
               onPointerDown={handleDragPointerDown}
-              className="p-1 text-white/30 hover:text-white/80 cursor-grab active:cursor-grabbing transition-colors"
+              className="p-1 -ml-1 text-white/30 hover:text-white/80 cursor-grab active:cursor-grabbing transition-colors shrink-0"
               title="Drag to reposition Dynamic Island anywhere"
               style={{ WebkitAppRegion: 'no-drag' } as any}
             >
-              <Move className="w-3 h-3" />
+              <Move className="w-3.5 h-3.5" />
             </div>
 
             {/* Middle: Indicator or Album Art */}
@@ -622,36 +689,49 @@ export const DynamicIsland: React.FC = () => {
             {/* Right: Sound Wave or Shortcut Hint */}
             <div className="flex items-center gap-1.5 shrink-0" style={{ WebkitAppRegion: 'no-drag' } as any}>
               {currentMedia && currentMedia.status === 'playing' ? (
-                <div className="flex gap-0.5 items-end h-3 px-1">
-                  {[0.5, 0.7, 0.45, 0.65].map((dur, i) => (
+                <div className="flex gap-1 items-end h-4 px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08]">
+                  {[0, 1, 2, 3].map((barIdx) => (
                     <motion.span
-                      key={i}
-                      animate={{ height: [3, 10, 4, 12, 3] }}
-                      transition={{ repeat: Infinity, duration: dur, ease: "easeInOut" }}
-                      className="w-[2px] rounded-full"
+                      key={barIdx}
+                      animate={{
+                        height: [
+                          4 + barIdx * 2,
+                          10 + ((barIdx + 1) % 3) * 3,
+                          3,
+                          12 - barIdx,
+                          4 + barIdx * 2
+                        ]
+                      }}
+                      transition={{
+                        repeat: Infinity,
+                        duration: 0.38 + barIdx * 0.1,
+                        ease: "easeInOut"
+                      }}
+                      className="w-[2.5px] rounded-full transition-colors"
                       style={{ backgroundColor: themeColor }}
                     />
                   ))}
                 </div>
               ) : (
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    toggleListening();
-                  }}
-                  className={clsx(
-                    "p-1 rounded-full transition-colors cursor-pointer",
-                    isVoiceActive ? "bg-cyan-500/20 text-cyan-300" : "hover:bg-white/10 text-white/60"
-                  )}
-                >
-                  <Mic className="w-3.5 h-3.5" />
-                </button>
+                <>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      toggleListening();
+                    }}
+                    className={clsx(
+                      "p-1 rounded-full transition-colors cursor-pointer",
+                      isVoiceActive ? "bg-cyan-500/20 text-cyan-300" : "hover:bg-white/10 text-white/60"
+                    )}
+                  >
+                    <Mic className="w-3.5 h-3.5" />
+                  </button>
+                  <span className="text-[9px] font-sans font-medium px-1.5 py-0.5 rounded-md bg-white/[0.08] text-white/50 border border-white/[0.06]">
+                    Alt+Space
+                  </span>
+                </>
               )}
-
-              <span className="text-[9px] font-mono font-medium px-1.5 py-0.5 rounded-md bg-white/[0.08] text-white/50 border border-white/[0.06]">
-                Alt+Space
-              </span>
             </div>
         </div>
 
@@ -755,7 +835,10 @@ export const DynamicIsland: React.FC = () => {
                 >
                   <span
                     className="w-2 h-2 rounded-full border border-white/40 shadow-sm"
-                    style={{ backgroundColor: currentTheme.color }}
+                    style={{
+                      backgroundColor: isRgbMode ? dynamicRgbColor : currentTheme.color,
+                      background: isRgbMode ? `conic-gradient(from ${rgbAngle}deg, #ff0055, #7928ca, #00dfd8, #0070f3, #ff0055)` : undefined
+                    }}
                   />
                   <Palette className="w-3 h-3" />
                 </button>
