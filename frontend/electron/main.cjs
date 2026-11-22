@@ -327,6 +327,19 @@ function createIslandWindow() {
       islandWindow.show();
     }
   }, 1200);
+
+  // Anti-Minimize Protection: Dynamic Island is an ambient desktop layer.
+  // If Windows attempts to minimize it (e.g. Win+D), immediately restore it.
+  islandWindow.on('minimize', (event) => {
+    event.preventDefault();
+    setTimeout(() => {
+      if (islandWindow && !islandWindow.isDestroyed()) {
+        islandWindow.restore();
+        islandWindow.setAlwaysOnTop(true, isIslandPinned ? 'screen-saver' : 'floating');
+        islandWindow.show();
+      }
+    }, 15);
+  });
 }
 
 function createTray() {
@@ -380,9 +393,13 @@ function toggleIsland() {
   try {
     if (!islandWindow || islandWindow.isDestroyed()) return;
     lastIslandToggle = Date.now();
+    if (islandWindow.isMinimized()) {
+      islandWindow.restore();
+    }
     if (!islandWindow.isVisible()) {
       islandWindow.show();
     }
+    islandWindow.setAlwaysOnTop(true, isIslandPinned ? 'screen-saver' : 'floating');
     islandWindow.focus();
     if (islandWindow.webContents && !islandWindow.webContents.isDestroyed()) {
       islandWindow.webContents.send('shortcut-triggered', 'toggle');
@@ -582,6 +599,18 @@ if (!gotTheLock) {
     createIslandWindow();
     createTray();
     registerShortcuts();
+
+    // Ambient Watchdog: keeps backend daemon alive & ensures Island never stays hidden or minimized
+    setInterval(() => {
+      ensureBackendRunning();
+      if (islandWindow && !islandWindow.isDestroyed()) {
+        if (islandWindow.isMinimized()) {
+          islandWindow.restore();
+          islandWindow.setAlwaysOnTop(true, isIslandPinned ? 'screen-saver' : 'floating');
+          islandWindow.show();
+        }
+      }
+    }, 5000);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {

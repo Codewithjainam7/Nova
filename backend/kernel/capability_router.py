@@ -36,6 +36,9 @@ class CapabilityRouter:
         _ensure_desktop()
         
         tools = [t.lower().strip() for t in task.required_tools]
+        desc_lower = task.description.lower()
+        app_name = task.action_metadata.get("app", "").lower().strip()
+        intent = task.action_metadata.get("intent", "").lower().strip()
         
         # 0. Background Search & Workspace Render
         if "background_search" in tools:
@@ -73,9 +76,6 @@ class CapabilityRouter:
             return res.get("status") == "SUCCESS"
 
         # Device/Phone Management & Mobile App Guard
-        desc_lower = task.description.lower()
-        app_name = task.action_metadata.get("app", "").lower().strip()
-        intent = task.action_metadata.get("intent", "").lower().strip()
         phone_apps = {"instagram", "whatsapp", "telegram", "phone", "messages"}
         
         is_phone_target = (
