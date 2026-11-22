@@ -119,6 +119,20 @@ export const NovaWebSocketProvider: React.FC<{ children: React.ReactNode }> = ({
         const data = JSON.parse(event.data);
         
         switch(data.type) {
+          case 'INCOMING_MESSAGE':
+            if (data.payload) {
+              useNovaStore.getState().setActiveHeadsUp(data.payload);
+              try {
+                if ((window as any).electronAPI?.setIslandExpanded) {
+                  (window as any).electronAPI.setIslandExpanded(true, 250);
+                }
+              } catch {}
+            }
+            break;
+          case 'MESSAGE_REPLIED':
+          case 'MESSAGE_DISMISSED':
+            useNovaStore.getState().setActiveHeadsUp(null);
+            break;
           case 'WAKE_WORD_DETECTED':
             try {
               if ((window as any).electronAPI?.setIslandExpanded) {

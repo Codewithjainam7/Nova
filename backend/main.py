@@ -951,6 +951,74 @@ async def get_call_screening_logs():
             records = []
     return {"logs": records}
 
+# -------------------------------------------------------------
+# Autonomous Messaging Hub & Dynamic Island Heads-Up Quick-Reply
+# -------------------------------------------------------------
+@app.get("/api/messaging/active")
+async def get_active_message():
+    from backend.devices.messaging import messaging_hub
+    return {
+        "active_message": messaging_hub.active_message.dict() if messaging_hub.active_message else None
+    }
+
+@app.post("/api/messaging/incoming")
+async def receive_incoming_message(payload: dict):
+    from backend.devices.messaging import messaging_hub
+    sender = payload.get("sender", "Unknown")
+    platform = payload.get("platform", "whatsapp")
+    message = payload.get("message", "")
+    suggested_reply = payload.get("suggested_reply")
+
+    msg = await messaging_hub.receive_message(
+        sender=sender,
+        platform=platform,
+        message=message,
+        suggested_reply=suggested_reply,
+        events_manager=events_ws_manager
+    )
+    return {"status": "success", "data": msg.dict()}
+
+@app.post("/api/messaging/simulate")
+async def simulate_incoming_message(payload: dict = None):
+    from backend.devices.messaging import messaging_hub
+    payload = payload or {}
+    sender = payload.get("sender", "Devisri")
+    platform = payload.get("platform", "whatsapp")
+    message = payload.get("message", "Hey! Are you free for the meeting right now?")
+    suggested_reply = payload.get("suggested_reply")
+
+    msg = await messaging_hub.receive_message(
+        sender=sender,
+        platform=platform,
+        message=message,
+        suggested_reply=suggested_reply,
+        events_manager=events_ws_manager
+    )
+    return {"status": "success", "simulated": True, "data": msg.dict()}
+
+@app.post("/api/messaging/reply")
+async def reply_incoming_message(payload: dict):
+    from backend.devices.messaging import messaging_hub
+    reply_text = payload.get("reply_text", "")
+    message_id = payload.get("message_id")
+    res = await messaging_hub.send_reply(
+        reply_text=reply_text,
+        message_id=message_id,
+        events_manager=events_ws_manager
+    )
+    return res
+
+@app.post("/api/messaging/dismiss")
+async def dismiss_incoming_message(payload: dict = None):
+    from backend.devices.messaging import messaging_hub
+    payload = payload or {}
+    message_id = payload.get("message_id")
+    res = await messaging_hub.dismiss_message(
+        message_id=message_id,
+        events_manager=events_ws_manager
+    )
+    return res
+
 @app.get("/api/system/media/current")
 async def get_current_system_media():
     """Returns currently playing media metadata (track, artist, thumbnail, duration) via GSMTC."""

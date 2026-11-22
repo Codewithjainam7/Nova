@@ -15,6 +15,16 @@ export interface ExecutionStep {
   description: string;
 }
 
+export interface IncomingMessagePayload {
+  id: string;
+  sender: string;
+  platform: 'whatsapp' | 'telegram' | 'sms' | 'app';
+  message: string;
+  suggested_reply: string;
+  timestamp: number;
+  status?: string;
+}
+
 export type IslandState = 'idle' | 'listening' | 'voice-listening' | 'thinking' | 'executing' | 'browser' | 'desktop' | 'vision' | 'error';
 
 interface NovaState {
@@ -24,8 +34,10 @@ interface NovaState {
   islandMessage: string;
   isStreaming: boolean;
   workspaceData: any;
+  activeHeadsUp: IncomingMessagePayload | null;
   
   // Actions
+  setActiveHeadsUp: (headsUp: IncomingMessagePayload | null) => void;
   addMessage: (msg: Message) => void;
   updateLastMessage: (content: string) => void;
   replaceLastMessage: (content: string) => void;
@@ -44,6 +56,9 @@ export const useNovaStore = create<NovaState>((set) => ({
   islandMessage: '',
   isStreaming: false,
   workspaceData: null,
+  activeHeadsUp: null,
+  
+  setActiveHeadsUp: (headsUp) => set({ activeHeadsUp: headsUp }),
   
   setWorkspaceData: (data) => set({ workspaceData: data }),
   
