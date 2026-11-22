@@ -261,6 +261,27 @@ function createIslandWindow() {
   islandWindow.webContents.on('did-finish-load', () => {
     console.log('[Electron] islandWindow did-finish-load! URL:', islandWindow.webContents.getURL());
     diskLog('IslandLife', `did-finish-load: ${islandWindow.webContents.getURL()}`);
+
+    setTimeout(() => {
+      if (!islandWindow || islandWindow.isDestroyed()) return;
+      islandWindow.webContents.executeJavaScript(`
+        (() => {
+          const root = document.getElementById('root');
+          return {
+            url: window.location.href,
+            search: window.location.search,
+            rootExists: !!root,
+            rootHTML: root ? root.innerHTML.slice(0, 500) : 'NO_ROOT',
+            bodyStyle: document.body.style.cssText,
+            windowSize: { innerWidth: window.innerWidth, innerHeight: window.innerHeight }
+          };
+        })()
+      `).then(res => {
+        diskLog('IslandDOM', res);
+      }).catch(err => {
+        diskLog('IslandDOMError', err ? err.message : String(err));
+      });
+    }, 1200);
   });
 
   islandWindow.webContents.on('console-message', (_event, level, message, line, sourceId) => {
