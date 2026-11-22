@@ -9,7 +9,7 @@ import {
   Smartphone, Shield, Sparkles,
   Play, Pause, SkipForward, SkipBack, Music,
   Palette, Activity, Wifi, Cpu, Laptop, Zap,
-  Pin, PinOff, RotateCcw, Move
+  Pin, PinOff, RotateCcw, Move, SunMedium
 } from 'lucide-react';
 import clsx from 'clsx';
 import { SquigglyWave } from './SquigglyWave';
@@ -107,6 +107,14 @@ export const DynamicIsland: React.FC = () => {
   type LightingMode = 'single-sync' | 'spectrum-sync' | 'auto-rgb' | 'static';
   const [lightingMode, setLightingMode] = useState<LightingMode>('single-sync');
   const [paletteMode, setPaletteMode] = useState<PaletteThemeKey>('pink');
+  const [lightingIntensity, setLightingIntensity] = useState<number>(() => {
+    try {
+      const saved = localStorage.getItem('nova_island_intensity');
+      return saved ? Math.min(100, Math.max(10, parseInt(saved, 10))) : 85;
+    } catch {
+      return 85;
+    }
+  });
   const [rgbAngle, setRgbAngle] = useState<number>(0);
   const [audioEnergy, setAudioEnergy] = useState<{ bass: number; mid: number; treble: number }>({
     bass: 0,
@@ -114,6 +122,16 @@ export const DynamicIsland: React.FC = () => {
     treble: 0
   });
   const animFrameRef = useRef<number>(0);
+  const isTransitioningRef = useRef<boolean>(false);
+
+  // Monitor expand/collapse to lock RAF updates during the 240ms transition
+  useEffect(() => {
+    isTransitioningRef.current = true;
+    const t = setTimeout(() => {
+      isTransitioningRef.current = false;
+    }, 240);
+    return () => clearTimeout(t);
+  }, [expanded]);
 
   // Real-Time Audio-Reactive Frequency Synthesizer & Dynamic RGB Chroma Rotator
   useEffect(() => {
@@ -124,6 +142,12 @@ export const DynamicIsland: React.FC = () => {
     const loop = (now: number) => {
       const delta = Math.min((now - lastTime) / 1000, 0.1);
       lastTime = now;
+
+      // When expanding or collapsing, freeze React state reconciliation so the GPU handles 100% of the transition with 0 lag
+      if (isTransitioningRef.current) {
+        animFrameRef.current = requestAnimationFrame(loop);
+        return;
+      }
 
       const isPlaying = currentMedia?.status === 'playing';
 
@@ -505,7 +529,7 @@ export const DynamicIsland: React.FC = () => {
   };
 
   // Expanded height: Generous clearance so no element or border is ever clipped
-  const expandedHeight = activeTab === 'gaming' ? 460 : (currentMedia && currentMedia.title ? 485 : 360);
+  const expandedHeight = activeTab === 'gaming' ? 470 : (currentMedia && currentMedia.title ? 510 : 375);
 
   // Inform Electron of dynamic bounds
   useEffect(() => {
@@ -634,6 +658,7 @@ export const DynamicIsland: React.FC = () => {
 
   const isFrequencyReactive = (lightingMode === 'single-sync' || lightingMode === 'spectrum-sync') && currentMedia?.status === 'playing';
   const themeAccentClass = isChromaTheme ? 'text-cyan-400' : currentTheme.accentClass;
+  const intensityFactor = Math.max(0.12, lightingIntensity / 100);
 
   return (
     <div className="fixed top-0 left-0 w-full h-full flex justify-center items-start pt-2 pointer-events-none z-[999999] select-none font-sans">
@@ -652,22 +677,26 @@ export const DynamicIsland: React.FC = () => {
         }}
         className={clsx(
           "pointer-events-auto overflow-hidden relative flex flex-col justify-start",
-          "border transition-all duration-150",
+          "border border-solid transform-gpu",
           expanded ? "shadow-none rounded-[26px]" : "hover:border-white/40 cursor-pointer rounded-full",
           "bg-[#0a0b10] text-white", // Solid OLED Dark
         )}
         style={{
           transformOrigin: "top center",
+          willChange: "width, height, border-radius",
+          transform: "translateZ(0)",
+          WebkitBackfaceVisibility: "hidden",
+          backfaceVisibility: "hidden",
           borderColor: isChromaTheme
-            ? `hsl(${rgbAngle}, 100%, 65%, ${0.4 + (isFrequencyReactive ? audioEnergy.bass * 0.45 : 0)})`
+            ? `hsl(${rgbAngle}, 100%, 65%, ${(0.25 + (isFrequencyReactive ? audioEnergy.bass * 0.45 : 0)) * intensityFactor + 0.12})`
             : (isFrequencyReactive
                 ? themeColor
-                : (currentTheme.color ? `${currentTheme.color}99` : 'rgba(255, 255, 255, 0.2)')),
+                : (currentTheme.color ? `${currentTheme.color}${Math.round(Math.max(25, 175 * intensityFactor)).toString(16).padStart(2, '0')}` : 'rgba(255, 255, 255, 0.2)')),
           boxShadow: isChromaTheme
-            ? `0 0 ${12 + (isFrequencyReactive ? audioEnergy.bass * 20 : 4)}px hsl(${rgbAngle}, 95%, 55%, ${0.28 + (isFrequencyReactive ? audioEnergy.bass * 0.4 : 0.1)})`
+            ? `0 0 ${Math.round((8 + (isFrequencyReactive ? audioEnergy.bass * 22 : 4)) * intensityFactor)}px hsl(${rgbAngle}, 95%, 55%, ${(0.22 + (isFrequencyReactive ? audioEnergy.bass * 0.4 : 0.08)) * intensityFactor})`
             : (isFrequencyReactive
-                ? `0 0 ${12 + audioEnergy.bass * 22}px ${themeColor}aa`
-                : `0 0 10px ${themeColor}40`)
+                ? `0 0 ${Math.round((8 + audioEnergy.bass * 24) * intensityFactor)}px ${themeColor}${Math.round(Math.max(25, 185 * intensityFactor)).toString(16).padStart(2, '0')}`
+                : `0 0 ${Math.round(10 * intensityFactor)}px ${themeColor}${Math.round(Math.max(15, 80 * intensityFactor)).toString(16).padStart(2, '0')}`)
         }}
         onClick={() => !expanded && setExpanded(true)}
       >
@@ -675,7 +704,7 @@ export const DynamicIsland: React.FC = () => {
         <div
           className="absolute top-0 left-0 right-0 h-24 pointer-events-none transition-opacity duration-300 z-0"
           style={{
-            opacity: currentMedia?.status === 'playing' ? 0.3 + audioEnergy.bass * 0.25 : 0.18,
+            opacity: (currentMedia?.status === 'playing' ? 0.28 + audioEnergy.bass * 0.25 : 0.16) * intensityFactor,
             background: isChromaTheme
               ? `radial-gradient(ellipse 90% 60% at 50% 0%, hsl(${rgbAngle}, 100%, 60%) 0%, transparent 100%)`
               : `radial-gradient(ellipse 80% 50% at 50% 0%, ${themeColor} 0%, transparent 100%)`
@@ -1142,7 +1171,64 @@ export const DynamicIsland: React.FC = () => {
                       </div>
                     </div>
 
-                    {/* Row 3: Live Real-Time Multi-Band Frequency Spectrum Bars */}
+                    {/* Row 3: Lighting Glow & Halo Intensity Control */}
+                    <div className="flex items-center justify-between px-2.5 py-1 bg-black/40 rounded-xl border border-white/[0.06] text-[10px]">
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <SunMedium className="w-3 h-3 text-amber-400" />
+                        <span className="font-mono text-white/50 tracking-wider text-[9px] font-semibold">INTENSITY:</span>
+                        <span className="font-mono font-bold text-white/90 text-[10px] w-7">{lightingIntensity}%</span>
+                      </div>
+
+                      {/* Smooth Range Slider */}
+                      <div className="flex items-center gap-2 flex-1 max-w-[210px] mx-2">
+                        <input
+                          type="range"
+                          min={15}
+                          max={100}
+                          step={1}
+                          value={lightingIntensity}
+                          onChange={(e) => {
+                            const val = Number(e.target.value);
+                            setLightingIntensity(val);
+                            try { localStorage.setItem('nova_island_intensity', String(val)); } catch {}
+                          }}
+                          className="w-full h-1 bg-white/10 rounded-full appearance-none cursor-pointer accent-white"
+                          title={`Adjust Glow & Reactive Lighting Intensity: ${lightingIntensity}%`}
+                        />
+                      </div>
+
+                      {/* Quick Presets */}
+                      <div className="flex items-center gap-1 shrink-0">
+                        {[
+                          { label: 'Low', val: 30 },
+                          { label: 'Med', val: 70 },
+                          { label: 'Max', val: 100 }
+                        ].map((preset) => {
+                          const isCur = Math.abs(lightingIntensity - preset.val) <= 10;
+                          return (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setLightingIntensity(preset.val);
+                                try { localStorage.setItem('nova_island_intensity', String(preset.val)); } catch {}
+                              }}
+                              className={clsx(
+                                "px-1.5 py-0.5 rounded text-[9px] font-mono font-semibold transition-all cursor-pointer",
+                                isCur
+                                  ? "bg-white/20 text-white border border-white/30"
+                                  : "text-white/40 hover:text-white hover:bg-white/10"
+                              )}
+                            >
+                              {preset.label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {/* Row 4: Live Real-Time Multi-Band Frequency Spectrum Bars */}
                     <div className="grid grid-cols-3 gap-1.5 pt-0.5">
                       {/* Bass (20-250Hz) */}
                       <div className="flex flex-col gap-1 bg-white/[0.03] p-1.5 rounded-lg border border-white/[0.05]">
