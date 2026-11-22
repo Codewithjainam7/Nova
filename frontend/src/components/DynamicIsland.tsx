@@ -96,6 +96,14 @@ export const DynamicIsland: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [recentResponse, setRecentResponse] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState('');
+  const [isPinned, setIsPinned] = useState(false);
+  
+  // Media State & High-Precision Audio Sync Clock (Declared FIRST to avoid TDZ ReferenceError)
+  const [currentMedia, setCurrentMedia] = useState<MediaTrack | null>(null);
+  const [playbackPos, setPlaybackPos] = useState<number>(0);
+  const lastSyncRef = useRef<{ title: string; pos: number; ts: number }>({ title: '', pos: 0, ts: Date.now() });
+  const [volumeLevel, setVolumeLevel] = useState<number>(50);
+
   type LightingSubMode = 'auto-rgb' | 'frequency' | 'solid';
   const [lightingSubMode, setLightingSubMode] = useState<LightingSubMode>('frequency');
   const [paletteMode, setPaletteMode] = useState<PaletteThemeKey>('rgb');
@@ -152,13 +160,6 @@ export const DynamicIsland: React.FC = () => {
     animFrameRef.current = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(animFrameRef.current);
   }, [currentMedia?.status]);
-  const [isPinned, setIsPinned] = useState(false);
-  
-  // Media State & High-Precision Audio Sync Clock
-  const [currentMedia, setCurrentMedia] = useState<MediaTrack | null>(null);
-  const [playbackPos, setPlaybackPos] = useState<number>(0);
-  const lastSyncRef = useRef<{ title: string; pos: number; ts: number }>({ title: '', pos: 0, ts: Date.now() });
-  const [volumeLevel, setVolumeLevel] = useState<number>(50);
 
   // Live Telemetry
   const [telemetry, setTelemetry] = useState<HardwareTelemetry>({

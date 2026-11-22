@@ -26,7 +26,7 @@ class CallScreeningDaemon:
             self.adb_path = adb_path
 
         self.project_root = project_root
-        self.enabled: bool = True
+        self.enabled: bool = False
         self.unattended_seconds: float = 8.0  # Auto-answer threshold (~2-3 rings)
         self.is_monitoring: bool = False
         self._monitor_task: Optional[asyncio.Task] = None
