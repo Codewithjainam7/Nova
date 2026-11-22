@@ -71,12 +71,18 @@ function checkBackendHealth(callback) {
   });
 }
 
+let isSpawningBackend = false;
+
 function ensureBackendRunning() {
+  if (isSpawningBackend) return;
   checkBackendHealth((running) => {
     if (!running) {
-      console.log('[Electron] Backend not detected on :8000. Spawning Python backend daemon...');
+      if (isSpawningBackend) return;
+      isSpawningBackend = true;
+      console.log('[Electron] Backend not detected on :8000. Spawning Python backend daemon (silent)...');
       const projectRoot = path.resolve(__dirname, '../../');
-      const pythonExe = path.join(projectRoot, 'backend', '.venv', 'Scripts', 'python.exe');
+      // Use pythonw.exe to guarantee no terminal or console window is ever spawned on Windows
+      const pythonExe = path.join(projectRoot, 'backend', '.venv', 'Scripts', 'pythonw.exe');
       
       try {
         const logPath = path.join(projectRoot, 'backend_daemon.log');
@@ -89,15 +95,18 @@ function ensureBackendRunning() {
         backendProcess = spawn(pythonExe, ['-m', 'uvicorn', 'backend.main:app', '--host', '0.0.0.0', '--port', '8000'], {
           cwd: projectRoot,
           detached: true,
-          stdio: ['ignore', outLog, outLog]
+          stdio: ['ignore', outLog, outLog],
+          windowsHide: true
         });
         backendProcess.unref();
-        console.log('[Electron] Backend daemon spawned with PID:', backendProcess.pid);
+        console.log('[Electron] Backend daemon spawned silently with PID:', backendProcess.pid);
       } catch (err) {
         console.error('[Electron] Failed to auto-spawn backend:', err);
+      } finally {
+        setTimeout(() => { isSpawningBackend = false; }, 6000);
       }
     } else {
-      console.log('[Electron] Backend engine is active on port 8000.');
+      // Backend is healthy
     }
   });
 }

@@ -545,7 +545,7 @@ export const DynamicIsland: React.FC = () => {
   };
 
   // Expanded height: Generous clearance so no element or border is ever clipped
-  const expandedHeight = activeTab === 'gaming' ? 470 : (currentMedia && currentMedia.title ? 510 : 375);
+  const expandedHeight = activeTab === 'gaming' ? 480 : 510;
 
   // Inform Electron of dynamic bounds
   const handleSendReply = useCallback(async () => {
@@ -623,14 +623,14 @@ export const DynamicIsland: React.FC = () => {
       // Browser preview context
     }
     if (expanded && inputRef.current && !recentResponse) {
-      setTimeout(() => inputRef.current?.focus(), 120);
+      setTimeout(() => inputRef.current?.focus({ preventScroll: true }), 120);
     }
   }, [expanded, expandedHeight, recentResponse, activeHeadsUp]);
 
-  // Global shortcuts & Heads-Up Navigation
+  // Dedicated Global IPC Shortcut Listener (Registered once with proper cleanup - avoids duplicate toggles)
   useEffect(() => {
     if (typeof window !== 'undefined' && (window as any).electronAPI?.onShortcutTriggered) {
-      (window as any).electronAPI.onShortcutTriggered((action: string) => {
+      const unsub = (window as any).electronAPI.onShortcutTriggered((action: string) => {
         if (action === 'toggle') {
           setExpanded((prev) => !prev);
         } else if (action === 'expand') {
@@ -638,11 +638,16 @@ export const DynamicIsland: React.FC = () => {
         } else if (action === 'collapse') {
           setExpanded(false);
           setRecentResponse(null);
-          // Ambient Heads-Up: Never dismiss on window blur so user can read message while gaming/coding!
         }
       });
+      return () => {
+        unsub?.();
+      };
     }
+  }, []);
 
+  // Keyboard navigation & Heads-Up Interaction
+  useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       // 1. Heads-Up Priority Navigation (Enter=Send, Tab=Edit, Esc=Dismiss)
       if (activeHeadsUp) {
@@ -655,7 +660,7 @@ export const DynamicIsland: React.FC = () => {
           e.preventDefault();
           setIsEditingReply((prev) => {
             const next = !prev;
-            if (next) setTimeout(() => replyInputRef.current?.focus(), 50);
+            if (next) setTimeout(() => replyInputRef.current?.focus({ preventScroll: true }), 50);
             return next;
           });
           return;
@@ -676,7 +681,7 @@ export const DynamicIsland: React.FC = () => {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [activeHeadsUp, handleSendReply, handleDismissHeadsUp, isEditingReply]);
+  }, [activeHeadsUp, handleSendReply, handleDismissHeadsUp]);
 
   const handleDispatch = async (text: string) => {
     const cmd = text.trim();
@@ -914,168 +919,160 @@ export const DynamicIsland: React.FC = () => {
             </div>
         </div>
 
-        {/* ---------------- HEADS-UP QUICK-REPLY CARD (Autonomous Messaging) ---------------- */}
-        <div
-          className={clsx(
-            "w-full h-full flex flex-col justify-between p-3.5 select-none relative z-20",
-            "transition-[opacity,transform] duration-220 ease-[cubic-bezier(0.16,1,0.3,1)]",
-            activeHeadsUp
-              ? "opacity-100 pointer-events-auto translate-y-0 scale-100"
-              : "opacity-0 pointer-events-none absolute inset-0 translate-y-2 scale-[0.98]"
-          )}
-          style={{ WebkitAppRegion: 'no-drag' } as any}
-        >
-          {activeHeadsUp && (
-            <>
-              {/* Header: Platform, Contact, Time, Dismiss */}
-              <div className="flex items-center justify-between pb-2 border-b border-white/[0.08]">
-                <div className="flex items-center gap-2">
-                  <span className={clsx(
-                    "w-2 h-2 rounded-full",
-                    activeHeadsUp.platform === 'telegram' ? "bg-sky-400" : "bg-emerald-400 animate-pulse"
+        {/* ---------------- HEADS-UP QUICK-REPLY CARD (Autonomous Messaging Overlay) ---------------- */}
+        {activeHeadsUp && (
+          <div
+            className="absolute inset-0 w-full h-full flex flex-col justify-between p-3.5 select-none z-20 bg-[#0a0b10] rounded-[24px] pointer-events-auto transition-[opacity,transform] duration-200"
+            style={{ WebkitAppRegion: 'no-drag' } as any}
+          >
+            {/* Header: Platform, Contact, Time, Dismiss */}
+            <div className="flex items-center justify-between pb-2 border-b border-white/[0.08]">
+              <div className="flex items-center gap-2">
+                <span className={clsx(
+                  "w-2 h-2 rounded-full",
+                  activeHeadsUp.platform === 'telegram' ? "bg-sky-400" : "bg-emerald-400 animate-pulse"
+                )} />
+                <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[10px] font-mono font-medium text-white/90">
+                  <MessageSquare className={clsx(
+                    "w-3 h-3",
+                    activeHeadsUp.platform === 'telegram' ? "text-sky-400" : "text-emerald-400"
                   )} />
-                  <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-white/[0.06] border border-white/[0.08] text-[10px] font-mono font-medium text-white/90">
-                    <MessageSquare className={clsx(
-                      "w-3 h-3",
-                      activeHeadsUp.platform === 'telegram' ? "text-sky-400" : "text-emerald-400"
-                    )} />
-                    {activeHeadsUp.platform ? activeHeadsUp.platform.toUpperCase() : "WHATSAPP"}
-                  </div>
-                  <span className="text-[13px] font-bold text-white tracking-wide">{activeHeadsUp.sender}</span>
+                  {activeHeadsUp.platform ? activeHeadsUp.platform.toUpperCase() : "WHATSAPP"}
                 </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-[10px] font-mono text-white/40">Just Now</span>
-                  <button
-                    type="button"
-                    onClick={handleDismissHeadsUp}
-                    className="text-white/40 hover:text-white p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
-                    title="Dismiss (Esc)"
-                  >
-                    <X className="w-3.5 h-3.5" />
-                  </button>
-                </div>
+                <span className="text-[13px] font-bold text-white tracking-wide">{activeHeadsUp.sender}</span>
               </div>
-
-              {/* Incoming message preview bubble */}
-              <div className="my-1.5 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/[0.08] text-[12px] text-white/90 font-sans leading-relaxed">
-                <span className="text-[9px] font-mono text-white/40 block mb-0.5 uppercase tracking-wider">Incoming</span>
-                "{activeHeadsUp.message}"
-              </div>
-
-              {/* ADA Smart Reply section */}
-              <div className="mb-1.5">
-                {replySuccessMessage ? (
-                  <div className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center gap-2 text-emerald-300 text-[12px] font-medium">
-                    <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-                    {replySuccessMessage}
-                  </div>
-                ) : isEditingReply ? (
-                  <div className="flex flex-col gap-1">
-                    <div className="flex items-center justify-between text-[9px] font-mono text-emerald-400/90 font-semibold uppercase">
-                      <span className="flex items-center gap-1">
-                        <Edit3 className="w-2.5 h-2.5" /> Editing Your Reply:
-                      </span>
-                      <span className="text-white/40">Press Enter to Send</span>
-                    </div>
-                    <input
-                      ref={replyInputRef}
-                      type="text"
-                      value={replyDraft}
-                      onChange={(e) => setReplyDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          e.preventDefault();
-                          handleSendReply();
-                        } else if (e.key === 'Escape') {
-                          e.preventDefault();
-                          setIsEditingReply(false);
-                        }
-                      }}
-                      className="w-full px-3 py-1.5 rounded-lg bg-black/60 border border-emerald-500/50 text-[12px] text-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
-                      placeholder="Type custom reply..."
-                      autoFocus
-                    />
-                  </div>
-                ) : (
-                  <div
-                    onClick={() => {
-                      setIsEditingReply(true);
-                      setTimeout(() => replyInputRef.current?.focus(), 60);
-                    }}
-                    className="group px-3 py-1.5 rounded-xl bg-emerald-500/[0.08] hover:bg-emerald-500/[0.14] border border-emerald-500/20 hover:border-emerald-500/40 transition-all cursor-pointer flex items-center justify-between"
-                    title="Click or press Tab to edit"
-                  >
-                    <div className="flex-1 pr-2">
-                      <div className="flex items-center gap-1 text-[9px] font-mono text-emerald-400 font-semibold mb-0.5">
-                        <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
-                        ADA SUGGESTED REPLY:
-                      </div>
-                      <div className="text-[12px] text-emerald-100 font-medium truncate">{replyDraft}</div>
-                    </div>
-                    <span className="text-[9px] text-white/40 group-hover:text-emerald-300 font-mono shrink-0 border border-white/10 px-1.5 py-0.5 rounded">
-                      Tab to Edit
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Footer Shortcuts & Actions */}
-              <div className="flex items-center justify-between pt-1.5 border-t border-white/[0.06]">
-                <div className="flex items-center gap-1.5">
-                  <button
-                    type="button"
-                    onClick={handleSendReply}
-                    disabled={isSendingReply}
-                    className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-500/40 text-emerald-300 text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-emerald-500/20"
-                  >
-                    <CornerDownLeft className="w-3 h-3 text-emerald-300" />
-                    <span>Send</span>
-                    <kbd className="text-[9px] font-mono bg-black/40 px-1 py-0.2 rounded text-emerald-400 border border-emerald-500/30">Enter</kbd>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsEditingReply((prev) => {
-                        const next = !prev;
-                        if (next) setTimeout(() => replyInputRef.current?.focus(), 60);
-                        return next;
-                      });
-                    }}
-                    className={clsx(
-                      "px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer",
-                      isEditingReply
-                        ? "bg-white/20 border-white/40 text-white"
-                        : "bg-white/[0.05] hover:bg-white/10 border-white/[0.08] text-white/70 hover:text-white"
-                    )}
-                  >
-                    <Edit3 className="w-3 h-3" />
-                    <span>{isEditingReply ? "Done" : "Edit"}</span>
-                    <kbd className="text-[9px] font-mono bg-black/40 px-1 py-0.2 rounded text-white/50 border border-white/10">Tab</kbd>
-                  </button>
-                </div>
-
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] font-mono text-white/40">Just Now</span>
                 <button
                   type="button"
                   onClick={handleDismissHeadsUp}
-                  className="px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-rose-500/15 border border-white/[0.08] hover:border-rose-500/30 text-white/50 hover:text-rose-300 text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ml-auto"
+                  className="text-white/40 hover:text-white p-1 rounded hover:bg-white/10 transition-colors cursor-pointer"
+                  title="Dismiss (Esc)"
                 >
-                  <X className="w-3 h-3" />
-                  <span>Ignore</span>
-                  <kbd className="text-[9px] font-mono bg-black/40 px-1 py-0.2 rounded text-white/40 border border-white/10">Esc</kbd>
+                  <X className="w-3.5 h-3.5" />
                 </button>
               </div>
-            </>
-          )}
-        </div>
+            </div>
+
+            {/* Incoming message preview bubble */}
+            <div className="my-1.5 px-3 py-2 rounded-xl bg-white/[0.04] border border-white/[0.08] text-[12px] text-white/90 font-sans leading-relaxed">
+              <span className="text-[9px] font-mono text-white/40 block mb-0.5 uppercase tracking-wider">Incoming</span>
+              "{activeHeadsUp.message}"
+            </div>
+
+            {/* ADA Smart Reply section */}
+            <div className="mb-1.5">
+              {replySuccessMessage ? (
+                <div className="px-3 py-2 rounded-xl bg-emerald-500/20 border border-emerald-500/40 flex items-center gap-2 text-emerald-300 text-[12px] font-medium">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+                  {replySuccessMessage}
+                </div>
+              ) : isEditingReply ? (
+                <div className="flex flex-col gap-1">
+                  <div className="flex items-center justify-between text-[9px] font-mono text-emerald-400/90 font-semibold uppercase">
+                    <span className="flex items-center gap-1">
+                      <Edit3 className="w-2.5 h-2.5" /> Editing Your Reply:
+                    </span>
+                    <span className="text-white/40">Press Enter to Send</span>
+                  </div>
+                  <input
+                    ref={replyInputRef}
+                    type="text"
+                    value={replyDraft}
+                    onChange={(e) => setReplyDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        handleSendReply();
+                      } else if (e.key === 'Escape') {
+                        e.preventDefault();
+                        setIsEditingReply(false);
+                      }
+                    }}
+                    className="w-full px-3 py-1.5 rounded-lg bg-black/60 border border-emerald-500/50 text-[12px] text-white focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                    placeholder="Type custom reply..."
+                    autoFocus
+                  />
+                </div>
+              ) : (
+                <div
+                  onClick={() => {
+                    setIsEditingReply(true);
+                    setTimeout(() => replyInputRef.current?.focus({ preventScroll: true }), 60);
+                  }}
+                  className="group px-3 py-1.5 rounded-xl bg-emerald-500/[0.08] hover:bg-emerald-500/[0.14] border border-emerald-500/20 hover:border-emerald-500/40 transition-all cursor-pointer flex items-center justify-between"
+                  title="Click or press Tab to edit"
+                >
+                  <div className="flex-1 pr-2">
+                    <div className="flex items-center gap-1 text-[9px] font-mono text-emerald-400 font-semibold mb-0.5">
+                      <Sparkles className="w-2.5 h-2.5 text-emerald-400" />
+                      ADA SUGGESTED REPLY:
+                    </div>
+                    <div className="text-[12px] text-emerald-100 font-medium truncate">{replyDraft}</div>
+                  </div>
+                  <span className="text-[9px] text-white/40 group-hover:text-emerald-300 font-mono shrink-0 border border-white/10 px-1.5 py-0.5 rounded">
+                    Tab to Edit
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Footer Shortcuts & Actions */}
+            <div className="flex items-center justify-between pt-1.5 border-t border-white/[0.06]">
+              <div className="flex items-center gap-1.5">
+                <button
+                  type="button"
+                  onClick={handleSendReply}
+                  disabled={isSendingReply}
+                  className="px-3 py-1 rounded-lg bg-emerald-500/20 hover:bg-emerald-500/35 border border-emerald-500/40 text-emerald-300 text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer shadow-sm shadow-emerald-500/20"
+                >
+                  <CornerDownLeft className="w-3 h-3 text-emerald-300" />
+                  <span>Send</span>
+                  <kbd className="text-[9px] font-mono bg-black/40 px-1 py-0.2 rounded text-emerald-400 border border-emerald-500/30">Enter</kbd>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingReply((prev) => {
+                      const next = !prev;
+                      if (next) setTimeout(() => replyInputRef.current?.focus({ preventScroll: true }), 60);
+                      return next;
+                    });
+                  }}
+                  className={clsx(
+                    "px-2.5 py-1 rounded-lg border text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer",
+                    isEditingReply
+                      ? "bg-white/20 border-white/40 text-white"
+                      : "bg-white/[0.05] hover:bg-white/10 border-white/[0.08] text-white/70 hover:text-white"
+                  )}
+                >
+                  <Edit3 className="w-3 h-3" />
+                  <span>{isEditingReply ? "Done" : "Edit"}</span>
+                  <kbd className="text-[9px] font-mono bg-black/40 px-1 py-0.2 rounded text-white/50 border border-white/10">Tab</kbd>
+                </button>
+              </div>
+
+              <button
+                type="button"
+                onClick={handleDismissHeadsUp}
+                className="px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-rose-500/15 border border-white/[0.08] hover:border-rose-500/30 text-white/50 hover:text-rose-300 text-[11px] font-medium flex items-center gap-1.5 transition-all cursor-pointer ml-auto"
+              >
+                <X className="w-3 h-3" />
+                <span>Ignore</span>
+                <kbd className="text-[9px] font-mono bg-black/40 px-1 py-0.2 rounded text-white/40 border border-white/10">Esc</kbd>
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* ---------------- EXPANDED ISLAND STATE (Snappy clean transition) ---------------- */}
         <div
           className={clsx(
             "w-full flex-1 flex flex-col p-3 overflow-hidden select-none relative z-10",
             "transition-[opacity,transform] duration-240 ease-[cubic-bezier(0.16,1,0.3,1)]",
-            (expanded && !activeHeadsUp)
-              ? "opacity-100 pointer-events-auto translate-y-0 scale-100 delay-100"
+            expanded
+              ? "opacity-100 pointer-events-auto translate-y-0 scale-100 delay-75"
               : "opacity-0 pointer-events-none absolute inset-0 translate-y-2 scale-[0.98]"
           )}
         >
@@ -1741,7 +1738,7 @@ export const DynamicIsland: React.FC = () => {
                   onClick={(e) => {
                     e.stopPropagation();
                     setInputValue("msg ");
-                    inputRef.current?.focus();
+                    inputRef.current?.focus({ preventScroll: true });
                   }}
                   className="px-2.5 py-1 rounded-lg text-[10px] font-medium bg-white/[0.05] hover:bg-green-500/20 text-white/80 hover:text-green-300 border border-white/[0.08] flex items-center gap-1 shrink-0 transition-all cursor-pointer"
                 >
