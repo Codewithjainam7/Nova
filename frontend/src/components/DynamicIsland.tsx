@@ -96,6 +96,8 @@ export const DynamicIsland: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [recentResponse, setRecentResponse] = useState<string | null>(null);
   const [currentTime, setCurrentTime] = useState('');
+  type LightingSubMode = 'auto-rgb' | 'frequency' | 'solid';
+  const [lightingSubMode, setLightingSubMode] = useState<LightingSubMode>('frequency');
   const [paletteMode, setPaletteMode] = useState<PaletteThemeKey>('rgb');
   const [rgbAngle, setRgbAngle] = useState<number>(0);
   const [audioEnergy, setAudioEnergy] = useState<{ bass: number; mid: number; treble: number }>({
@@ -488,7 +490,7 @@ export const DynamicIsland: React.FC = () => {
   };
 
   // Expanded height: Generous clearance so no element or border is ever clipped
-  const expandedHeight = activeTab === 'gaming' ? 440 : (currentMedia && currentMedia.title ? 360 : 320);
+  const expandedHeight = activeTab === 'gaming' ? 440 : (currentMedia && currentMedia.title ? 425 : 330);
 
   // Inform Electron of dynamic bounds
   useEffect(() => {
@@ -587,10 +589,22 @@ export const DynamicIsland: React.FC = () => {
   };
 
   const isVoiceActive = islandState === 'voice-listening' || isListening;
-  const isRgbMode = paletteMode === 'rgb';
-  const dynamicRgbColor = isRgbMode ? `hsl(${rgbAngle}, 100%, 65%)` : null;
+  const isRgbMode = paletteMode === 'rgb' || lightingSubMode === 'auto-rgb' || lightingSubMode === 'frequency';
+  
+  // Frequency-Driven Dynamic Color Synthesis:
+  // Bass -> Fiery Neon Crimson / Violet (300°-340°), Mids -> Electric Cyan / Azure (180°-210°), Treble -> Shimmering Gold (40°-60°)
+  const dominantFreqHue = Math.round(
+    (audioEnergy.bass * 320 + audioEnergy.mid * 190 + audioEnergy.treble * 50) /
+    Math.max(0.01, audioEnergy.bass + audioEnergy.mid + audioEnergy.treble)
+  );
+  const frequencyColor = `hsl(${dominantFreqHue}, 100%, 65%)`;
+
+  const dynamicRgbColor = (lightingSubMode === 'frequency' && currentMedia?.status === 'playing')
+    ? frequencyColor
+    : `hsl(${rgbAngle}, 100%, 65%)`;
+
   const currentTheme = THEMES[paletteMode] || THEMES.rgb;
-  const themeColor = dynamicRgbColor || currentTheme.color;
+  const themeColor = isRgbMode ? dynamicRgbColor : currentTheme.color;
   const themeAccentClass = isRgbMode ? 'text-cyan-400' : currentTheme.accentClass;
 
   return (
@@ -970,6 +984,104 @@ export const DynamicIsland: React.FC = () => {
                         ? `-${formatTime(Math.max(0, currentMedia.duration - playbackPos))}`
                         : "-0:00"}
                     </span>
+                  </div>
+
+                  {/* ---------------- LIVE LIGHTING & FREQUENCY SPECTRUM HUD ---------------- */}
+                  <div className="w-full mt-1.5 p-2 rounded-xl bg-white/[0.04] border border-white/[0.08] flex flex-col gap-2">
+                    {/* Row 1: Lighting Mode Selector */}
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-1.5 text-[10px] font-semibold text-white/60 tracking-wider">
+                        <Sparkles className="w-3 h-3 text-cyan-400" />
+                        <span>LIGHTING MODE</span>
+                      </div>
+
+                      <div className="flex items-center gap-1 bg-black/40 p-0.5 rounded-lg border border-white/10">
+                        {/* Option 1: Auto RGB Flow */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPaletteMode('rgb');
+                            setLightingSubMode('auto-rgb');
+                          }}
+                          className={clsx(
+                            "px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer",
+                            lightingSubMode === 'auto-rgb'
+                              ? "bg-cyan-500/25 text-cyan-300 border border-cyan-400/40 shadow-sm"
+                              : "text-white/50 hover:text-white"
+                          )}
+                          title="Smooth continuous 360° rainbow hue cycle over time"
+                        >
+                          <span className="w-1.5 h-1.5 rounded-full bg-gradient-to-r from-pink-400 via-cyan-400 to-purple-400" />
+                          Auto RGB Flow
+                        </button>
+
+                        {/* Option 2: Frequency-Reactive Mode */}
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setPaletteMode('rgb');
+                            setLightingSubMode('frequency');
+                          }}
+                          className={clsx(
+                            "px-2 py-0.5 rounded-md text-[10px] font-semibold flex items-center gap-1 transition-all cursor-pointer",
+                            lightingSubMode === 'frequency'
+                              ? "bg-emerald-500/25 text-emerald-300 border border-emerald-400/40 shadow-sm"
+                              : "text-white/50 hover:text-white"
+                          )}
+                          title="Lighting colors and border pulse react to Bass, Mids, and Treble"
+                        >
+                          <Zap className="w-2.5 h-2.5 text-emerald-400" />
+                          Frequency Sync
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* Row 2: Live Real-Time Multi-Band Frequency Spectrum Bars */}
+                    <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                      {/* Bass (20-250Hz) */}
+                      <div className="flex flex-col gap-1 bg-white/[0.03] p-1.5 rounded-lg border border-white/[0.05]">
+                        <div className="flex items-center justify-between text-[9px] font-mono">
+                          <span className="text-rose-400 font-bold">BASS</span>
+                          <span className="text-white/40">{Math.round(audioEnergy.bass * 100)}%</span>
+                        </div>
+                        <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-rose-500 rounded-full transition-all duration-75"
+                            style={{ width: `${Math.round(audioEnergy.bass * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Mids (250-4000Hz) */}
+                      <div className="flex flex-col gap-1 bg-white/[0.03] p-1.5 rounded-lg border border-white/[0.05]">
+                        <div className="flex items-center justify-between text-[9px] font-mono">
+                          <span className="text-cyan-400 font-bold">MIDS</span>
+                          <span className="text-white/40">{Math.round(audioEnergy.mid * 100)}%</span>
+                        </div>
+                        <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-cyan-400 rounded-full transition-all duration-75"
+                            style={{ width: `${Math.round(audioEnergy.mid * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+
+                      {/* Treble (4-16kHz) */}
+                      <div className="flex flex-col gap-1 bg-white/[0.03] p-1.5 rounded-lg border border-white/[0.05]">
+                        <div className="flex items-center justify-between text-[9px] font-mono">
+                          <span className="text-purple-400 font-bold">TREB</span>
+                          <span className="text-white/40">{Math.round(audioEnergy.treble * 100)}%</span>
+                        </div>
+                        <div className="w-full h-1 bg-white/10 rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-purple-400 rounded-full transition-all duration-75"
+                            style={{ width: `${Math.round(audioEnergy.treble * 100)}%` }}
+                          />
+                        </div>
+                      </div>
+                    </div>
                   </div>
                 </div>
               )}
