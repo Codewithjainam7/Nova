@@ -85,18 +85,60 @@ class WindowsApplicationManager:
                     except Exception as e:
                         app_logger.warning(f"Failed to focus window {title_substr}: {e}")
 
+                # Helper: Candidate browser paths on Windows
+                def _find_browser_exe(browser_type: str) -> Optional[str]:
+                    b_type = browser_type.lower()
+                    candidates = []
+                    if "chrome" in b_type:
+                        candidates = [
+                            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+                            os.path.expandvars(r"%PROGRAMFILES%\Google\Chrome\Application\chrome.exe"),
+                            os.path.expandvars(r"%PROGRAMFILES(X86)%\Google\Chrome\Application\chrome.exe"),
+                        ]
+                    elif "brave" in b_type:
+                        candidates = [
+                            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+                            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
+                            os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe"),
+                        ]
+                    elif "edge" in b_type:
+                        candidates = [
+                            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                            r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                            os.path.expandvars(r"%LOCALAPPDATA%\Microsoft\Edge\Application\msedge.exe"),
+                        ]
+                    else:
+                        # Fallback order for generic "browser"
+                        candidates = [
+                            r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
+                            r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                            r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                            os.path.expandvars(r"%LOCALAPPDATA%\Google\Chrome\Application\chrome.exe"),
+                        ]
+                    for path in candidates:
+                        if path and os.path.exists(path):
+                            return path
+                    return None
+
+                target_browser_kw = "chrome" if "chrome" in app_name_or_path.lower() else "brave" if "brave" in app_name_or_path.lower() else "edge" if "edge" in app_name_or_path.lower() else "browser"
+
                 if url:
                     # 1. If browser window is already open, focus it and open a new tab directly
                     try:
                         _ensure_desktop()
                         import win32gui, win32con, time, pyautogui, pyperclip
                         matched_hwnd = None
-                        target_kw = "brave" if "brave" in app_name_or_path.lower() else "chrome" if "chrome" in app_name_or_path.lower() else "edge" if "edge" in app_name_or_path.lower() else ""
                         def find_cb(h, _):
                             nonlocal matched_hwnd
                             if win32gui.IsWindowVisible(h):
                                 title = win32gui.GetWindowText(h).lower()
-                                if target_kw and target_kw in title:
+                                if target_browser_kw != "browser":
+                                    if target_browser_kw in title:
+                                        matched_hwnd = h
+                                elif any(k in title for k in ["chrome", "brave", "edge"]):
                                     matched_hwnd = h
                         win32gui.EnumWindows(find_cb, None)
                         if matched_hwnd:
@@ -114,20 +156,16 @@ class WindowsApplicationManager:
                     except Exception as e:
                         app_logger.warning(f"Active browser tab injection failed: {e}")
 
-                    # 2. Cold launch if no existing window
-                    if "brave" in app_name_or_path.lower():
-                        brave_candidates = [
-                            r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe",
-                            r"C:\Program Files (x86)\BraveSoftware\Brave-Browser\Application\brave.exe",
-                            os.path.expandvars(r"%LOCALAPPDATA%\BraveSoftware\Brave-Browser\Application\brave.exe")
-                        ]
-                        for bp in brave_candidates:
-                            if os.path.exists(bp):
-                                import subprocess
-                                app_logger.info(f"Launching Brave directly with URL: {url}")
-                                subprocess.Popen([bp, url])
-                                _focus_window("Brave")
-                                return
+                    # 2. Cold launch with URL
+                    browser_exe = _find_browser_exe(target_browser_kw)
+                    if browser_exe:
+                        import subprocess
+                        app_logger.info(f"Launching {browser_exe} directly with URL: {url}")
+                        cflags = 0x08000000  # CREATE_NO_WINDOW
+                        subprocess.Popen([browser_exe, url], creationflags=cflags)
+                        _focus_window(target_browser_kw)
+                        return
+
                     try:
                         app_logger.info(f"Opening URL via default browser: {url}")
                         os.startfile(url)
@@ -136,7 +174,18 @@ class WindowsApplicationManager:
                     except Exception as e:
                         app_logger.warning(f"os.startfile({url}) failed: {e}")
 
-                # Standard app launch
+                # Standard app launch (no URL)
+                # First check if this is a known browser to launch directly
+                if target_browser_kw in ["chrome", "brave", "edge"]:
+                    browser_exe = _find_browser_exe(target_browser_kw)
+                    if browser_exe:
+                        import subprocess
+                        app_logger.info(f"Launching browser directly: {browser_exe}")
+                        cflags = 0x08000000  # CREATE_NO_WINDOW
+                        subprocess.Popen([browser_exe], creationflags=cflags)
+                        _focus_window(target_browser_kw)
+                        return
+
                 try:
                     app_logger.info(f"Trying os.startfile({exe_name})")
                     os.startfile(exe_name)

@@ -1,3 +1,4 @@
+import os
 import json
 import uuid
 import re
@@ -6,6 +7,11 @@ from backend.planner.schema import Plan, Intent, Goal, Task, IntentType, RiskLev
 from backend.providers.core import AIProviderManager
 from backend.providers.schema import GenerationRequest, Message, Role, ProviderType, CognitiveDomain
 from backend.core.logger import app_logger
+from backend.services.web_service_registry import (
+    resolve_web_service,
+    clean_conversational_noise,
+    extract_search_topic
+)
 
 class PlannerCore:
     """
@@ -45,10 +51,26 @@ IMPORTANT RULES:
      If user asks to ORGANIZE, sort, or clean up a folder (e.g. 'organize my downloads', 'organize downloads folder by creating folders', 'sort my downloads', 'organize my files'): use "desktop" in required_tools with app "explorer", intent "organize_folder", entity "<folder_name>" (default "downloads"), and desktop_action "APP_INTENT_EXECUTE". NEVER just open the folder when the user specifically asks to organize it!
    - For Windows Settings: If user asks to open settings or check updates/display/bluetooth, use "desktop" in required_tools with app "settings", intent "navigate", entity "<section_name>", and desktop_action "APP_INTENT_EXECUTE".
    - For Spotify on PC: If user asks to play a song/artist/playlist on Spotify on PC (e.g. 'play sunflower on spotify'), use "desktop" in required_tools with app "spotify", intent "play_media", entity "<song/artist>", and desktop_action "APP_INTENT_EXECUTE".
-   - For desktop apps & browsers (e.g. Brave, Chrome, Edge, Paint, Task Manager, VS Code): use "desktop" in required_tools with app "<name>", intent "open_app" (or "close_app"), and desktop_action "APP_LAUNCH". If the user mentions opening a website, YouTube, or playing videos in a browser (e.g. 'open brave and play youtube', 'open chrome and go to reddit', 'open youtube in browser'), MUST provide "url" in action_metadata (e.g. "url": "https://www.youtube.com") and "app": "brave" (or "chrome").
-2. BROWSER AUTOMATION & WEB NAVIGATION:
-   - If user asks to SEARCH the web, lookup information on Google, or open a website in browser (e.g. 'search Google for SpaceX launch', 'search web for Nvidia stock', 'open youtube.com in browser', 'open github in browser'):
-     Use "browser" in required_tools. If searching, provide "query" and set intent to "search". If navigating to a URL, provide "url" and set intent to "navigate".
+   - For desktop apps & browsers (e.g. Chrome, Brave, Edge, Paint, Task Manager, VS Code): use "desktop" in required_tools with app "<name>", intent "open_app" (or "close_app"), and desktop_action "APP_LAUNCH".
+   - PRODUCTIVITY SUITES & CANONICAL WEB SERVICES (Google Docs, Sheets, Slides, Drive, Gmail, GitHub, ChatGPT, Claude, etc.):
+     When the user asks to open a productivity suite or canonical service (e.g. 'open chrome and open google docs', 'open google sheets', 'open chatgpt', 'open github in browser'):
+     NEVER search Google for the name of the service!
+     Always launch the browser with the canonical destination URL:
+     * Google Docs: "https://docs.google.com" (or "https://docs.new" if creating a new doc)
+     * Google Sheets: "https://sheets.google.com" (or "https://sheets.new" if creating a new sheet)
+     * Google Slides: "https://slides.google.com"
+     * Google Drive: "https://drive.google.com"
+     * Gmail: "https://mail.google.com"
+     * Google Calendar: "https://calendar.google.com"
+     * GitHub: "https://github.com"
+     * ChatGPT: "https://chatgpt.com"
+     * Claude: "https://claude.ai"
+     * YouTube: "https://www.youtube.com" (or search results if a specific song/video query is requested)
+     Set required_tools: ["desktop"], app: "chrome" (or the browser requested), intent: "open_app", desktop_action: "APP_LAUNCH", and provide "url" in action_metadata. Strip conversational fluff (e.g. 'for me i hv to work', 'fast', 'please') from URLs.
+2. BROWSER AUTOMATION & WEB SEARCH:
+   - If user asks to SEARCH the web or lookup information (e.g. 'search Google for SpaceX launch', 'search web for Nvidia stock'):
+     If the user explicitly asks to open or search in a desktop browser window (e.g. 'open chrome and search quantum physics'), use "desktop" with app: "chrome", intent: "open_app", desktop_action: "APP_LAUNCH", and url: "https://www.google.com/search?q=<query>".
+     Otherwise, use "browser" or "background_search" in required_tools. If searching, provide "query" and set intent to "search".
 3. CRITICAL CONVERSATIONAL GUARD: If the user is just saying hello, asking a general knowledge question to be answered in chat, or chatting conversationally, DO NOT OUTPUT ANY DESKTOP OR BROWSER TASKS. Set tasks to an empty array [].
 4. If the user asks to search for news, maps, or background information to be displayed on the Nova workspace screen, use "background_search" in required_tools and provide "query" in action_metadata.
 5. If the user asks to interact with their phone (e.g., check battery, connect phone, pair phone, open app on phone, play a song or video on phone, send a message, transfer a file, or open/view a file/image on the phone), use "device" in required_tools. For pairing, set intent to "pair". For connecting, set intent to "connect". For battery, set intent to "get_battery". For opening an app, set intent to "open_app". For playing a song/video/media on the phone, MUST set intent to "play_media", provide the media name in "entity", and provide the target app (e.g. "youtube", "spotify") in "app" within action_metadata.
@@ -474,59 +496,132 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             goal = Goal(primary_goal=f"Organize {target_folder.capitalize()} folder")
             return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
 
-        # 1. Open Physical Desktop Browser / Brave / Chrome / Edge / YouTube
-        # CRITICAL: ONLY launch a physical browser window if the user EXPLICITLY asks to open/launch it.
-        # General search/research queries must NEVER open physical desktop browser windows.
+        # 1. Web Services, Productivity Suites, Browser Navigation, Search & YouTube Fast-Path
+        clean_text = clean_conversational_noise(query)
+        clean_lower = clean_text.lower()
+
+        # Check if a specific browser is mentioned in original or cleaned query
+        has_browser_mention = any(b in q for b in ["brave", "chrome", "edge", "firefox", "browser"])
         is_explicit_browser_cmd = any(q.startswith(k) or f" {k}" in q for k in [
             "open brave", "open chrome", "open edge", "open browser",
-            "launch brave", "launch chrome", "launch edge", "launch browser",
-            "open youtube", "launch youtube", "play on youtube"
-        ]) or ("youtube" in q and any(w in q for w in ["play", "watch", "listen", "video", "song"]))
+            "launch brave", "launch chrome", "launch edge", "launch browser"
+        ])
 
-        if is_explicit_browser_cmd:
-            target_app = "brave" if "brave" in q else "chrome" if "chrome" in q else "edge" if "edge" in q else "browser"
-            target_url = ""
-            if "youtube" in q:
-                # Extract specific video, channel, or song query
-                clean_q = re.sub(r'\b(open|launch|in|browser|broswer|on|laptop|pc|please|can you|play|watch|video|videos|youtube|and|the)\b', ' ', q, flags=re.IGNORECASE)
-                clean_q = re.sub(r'\b(brave|chrome|edge)\b', ' ', clean_q, flags=re.IGNORECASE).strip()
-                clean_q = ' '.join(clean_q.split())
-                if clean_q and len(clean_q) > 1:
-                    import urllib.parse
-                    encoded = urllib.parse.quote_plus(clean_q)
-                    target_url = f"https://www.youtube.com/results?search_query={encoded}"
-                    desc = f"Open {target_app} and play '{clean_q}' on YouTube"
-                else:
-                    target_url = "https://www.youtube.com"
-                    desc = f"Launch {target_app} and open YouTube"
-            elif any(s in q for s in ["search", "google", "look up", "find"]):
-                clean_q = re.sub(r'\b(open|launch|in|browser|broswer|on|laptop|pc|please|can you|search|google|for|look up|find|and|the)\b', ' ', q, flags=re.IGNORECASE)
-                clean_q = re.sub(r'\b(brave|chrome|edge)\b', ' ', clean_q, flags=re.IGNORECASE).strip()
-                clean_q = ' '.join(clean_q.split())
-                if clean_q:
-                    import urllib.parse
-                    target_url = f"https://www.google.com/search?q={urllib.parse.quote_plus(clean_q)}"
-                    desc = f"Search '{clean_q}' in {target_app}"
-                else:
-                    target_url = "https://www.google.com"
-                    desc = f"Launch {target_app}"
+        # Detect target browser (default to Chrome if installed, else Brave, else Edge/browser)
+        if "chrome" in q:
+            target_app = "chrome"
+        elif "brave" in q:
+            target_app = "brave"
+        elif "edge" in q:
+            target_app = "edge"
+        elif "firefox" in q:
+            target_app = "firefox"
+        else:
+            target_app = "chrome" if os.path.exists(r"C:\Program Files\Google\Chrome\Application\chrome.exe") else "brave" if os.path.exists(r"C:\Program Files\BraveSoftware\Brave-Browser\Application\brave.exe") else "browser"
+
+        # Check if query targets a registered web service (Google Docs, Sheets, Drive, Gmail, GitHub, ChatGPT, etc.)
+        matched_service = resolve_web_service(query)
+
+        # Check if query is targeting YouTube
+        is_youtube = (matched_service and matched_service.get("service_id") == "youtube") or ("youtube" in q and any(w in q for w in ["play", "watch", "listen", "video", "song"]))
+
+        if is_youtube:
+            # Extract specific song / video / channel query if present
+            clean_yt = re.sub(r'\b(?:open|launch|in|browser|broswer|on|laptop|pc|please|can\s+you|play|watch|video|videos|youtube|and|the|song|track|go\s+to|go|to|navigate\s+to|navigate|visit)\b', ' ', clean_lower, flags=re.IGNORECASE)
+            clean_yt = re.sub(r'\b(?:brave|chrome|edge|firefox)\b', ' ', clean_yt, flags=re.IGNORECASE).strip()
+            clean_yt = ' '.join(clean_yt.split())
+            if clean_yt and len(clean_yt) > 1 and clean_yt not in ["music", "videos", "video", "home", "homepage"]:
+                import urllib.parse
+                encoded = urllib.parse.quote_plus(clean_yt)
+                target_url = f"https://www.youtube.com/results?search_query={encoded}"
+                desc = f"Launch {target_app.capitalize()} and play '{clean_yt}' on YouTube"
             else:
-                desc = f"Launch {target_app}"
+                target_url = "https://www.youtube.com"
+                desc = f"Launch {target_app.capitalize()} and open YouTube"
 
-            meta = {
-                "app": target_app,
-                "intent": "open_app",
-                "desktop_action": "APP_LAUNCH"
-            }
-            if target_url:
-                meta["url"] = target_url
-                
             task = Task(
                 task_id=str(uuid.uuid4()),
                 description=desc,
                 required_tools=["desktop"],
                 risk=RiskLevel.LOW,
-                action_metadata=meta
+                action_metadata={
+                    "app": target_app,
+                    "intent": "open_app",
+                    "desktop_action": "APP_LAUNCH",
+                    "url": target_url,
+                    "service": "YouTube"
+                }
+            )
+            intent = Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.99, raw_query=query)
+            goal = Goal(primary_goal=desc)
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # If a web service was matched (Docs, Sheets, Drive, Gmail, GitHub, ChatGPT, Claude, Netflix, etc.)
+        if matched_service:
+            target_url = matched_service["url"]
+            service_name = matched_service["name"]
+            if matched_service.get("is_new_item"):
+                desc = f"Launch {target_app.capitalize()} and create new document in {service_name}"
+            else:
+                desc = f"Launch {target_app.capitalize()} and navigate to {service_name}"
+
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=desc,
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": target_app,
+                    "intent": "open_app",
+                    "desktop_action": "APP_LAUNCH",
+                    "url": target_url,
+                    "service": service_name
+                }
+            )
+            intent = Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.99, raw_query=query)
+            goal = Goal(primary_goal=desc)
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # Check for explicit web search query in browser
+        # e.g. "search google for quantum physics", "search for latest ai models on chrome", "google black holes"
+        is_explicit_search = (
+            any(s in clean_lower for s in ["search google for", "search for", "search web for", "google for", "look up"])
+            or (has_browser_mention and any(s in clean_lower for s in ["search", "google", "find"]))
+            or (clean_lower.startswith("search ") or clean_lower.startswith("google "))
+        )
+        if is_explicit_search:
+            clean_topic, target_url = extract_search_topic(query, target_app)
+            desc = f"Search '{clean_topic}' in {target_app.capitalize()}"
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=desc,
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": target_app,
+                    "intent": "open_app",
+                    "desktop_action": "APP_LAUNCH",
+                    "url": target_url,
+                    "query": clean_topic
+                }
+            )
+            intent = Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.98, raw_query=query)
+            goal = Goal(primary_goal=desc)
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # If user explicitly asked to launch or open browser with no destination or search
+        if is_explicit_browser_cmd:
+            desc = f"Launch {target_app.capitalize()}"
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=desc,
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": target_app,
+                    "intent": "open_app",
+                    "desktop_action": "APP_LAUNCH"
+                }
             )
             intent = Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.98, raw_query=query)
             goal = Goal(primary_goal=desc)
@@ -534,8 +629,17 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
 
         # 2. Calculator
         if "calc" in q or any(op in q for op in [" + ", " - ", " * ", " / ", "plus", "minus", "times", "divide"]):
-            expr = re.sub(r'^(open calculator and|calculate|solve|what is)\s*', '', q, flags=re.IGNORECASE)
+            expr = re.sub(r'^(?:open calculator and|open calculator|calculate|solve|what is)\s*(?:calculate|solve)?\s*', '', q, flags=re.IGNORECASE)
             expr = re.sub(r'\s*(in calculator|on calculator)\s*$', '', expr, flags=re.IGNORECASE).strip()
+            if not expr:
+                task = Task(
+                    task_id=str(uuid.uuid4()),
+                    description="Launch Calculator",
+                    required_tools=["desktop"],
+                    risk=RiskLevel.LOW,
+                    action_metadata={"app": "calculator", "intent": "open_app", "desktop_action": "APP_LAUNCH"}
+                )
+                return Plan(plan_id=str(uuid.uuid4()), intent=Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.98, raw_query=query), goal=Goal(primary_goal="Launch Calculator"), tasks=[task])
             task = Task(
                 task_id=str(uuid.uuid4()),
                 description=f"Calculate {expr} in Calculator",
@@ -586,7 +690,6 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             # Resolve contact alias
             resolved_contact = raw_contact
             try:
-                import os, json
                 contacts_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "devices", "known_contacts.json")
                 if os.path.exists(contacts_file):
                     with open(contacts_file, "r", encoding="utf-8") as cf:
@@ -638,15 +741,15 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
 
         # 6. Open generic desktop application (Only for true desktop apps, NOT phone/mobile apps)
-        if (q.startswith("open ") or q.startswith("launch ")) and not any(k in q for k in ["msg", "message", "send", "whatsapp", "telegram", "instagram", "insta", "text", "phone"]):
-            app_name = q.split(" ")[1].strip()
+        if (clean_lower.startswith("open ") or clean_lower.startswith("launch ")) and not any(k in clean_lower for k in ["msg", "message", "send", "whatsapp", "telegram", "instagram", "insta", "text", "phone"]):
+            app_name = re.sub(r'^(?:open|launch)\s+', '', clean_lower).strip()
             task = Task(
                 task_id=str(uuid.uuid4()),
-                description=f"Launch {app_name}",
+                description=f"Launch {app_name.capitalize()}",
                 required_tools=["desktop"],
                 risk=RiskLevel.LOW,
                 action_metadata={"app": app_name, "intent": "open_app", "desktop_action": "APP_LAUNCH"}
             )
-            return Plan(plan_id=str(uuid.uuid4()), intent=Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.95, raw_query=query), goal=Goal(primary_goal=f"Launch {app_name}"), tasks=[task])
+            return Plan(plan_id=str(uuid.uuid4()), intent=Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.95, raw_query=query), goal=Goal(primary_goal=f"Launch {app_name.capitalize()}"), tasks=[task])
 
         return None

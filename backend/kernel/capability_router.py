@@ -285,7 +285,14 @@ class CapabilityRouter:
                 action = DesktopAction(action_type=DesktopActionType.APP_LAUNCH, payload=payload)
                 await self.desktop_engine.perform_action(action)
                 if url:
-                    task.action_metadata["execution_output"] = f"Launched {app_name or entity} and navigated to {url}"
+                    service_display = meta.get("service")
+                    search_query = meta.get("query")
+                    if service_display:
+                        task.action_metadata["execution_output"] = f"Launched {app_name or entity} and opened {service_display}"
+                    elif search_query:
+                        task.action_metadata["execution_output"] = f"Launched {app_name or entity} and searched for '{search_query}'"
+                    else:
+                        task.action_metadata["execution_output"] = f"Launched {app_name or entity} and navigated to {url}"
                 else:
                     task.action_metadata["execution_output"] = f"Launched {app_name or entity}"
                 return True
