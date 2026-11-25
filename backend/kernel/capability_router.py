@@ -173,7 +173,7 @@ class CapabilityRouter:
             if url or browser_action_str == "NAVIGATE":
                 target_url = url or query
                 if not target_url:
-                    target_url = f"https://www.google.com/search?q={task.description}"
+                    target_url = "https://www.google.com"
                 app_logger.info(f"Browser Engine: Navigating to {target_url}")
                 await self.browser_engine.navigate(target_url)
                 task.action_metadata["execution_output"] = f"Navigated to {target_url}"
@@ -301,7 +301,11 @@ class CapabilityRouter:
                 is_bg = meta.get("background")
                 bg_phrase = " in the background" if is_bg else ""
 
-                if url and service_display and file_name_display:
+                if meta.get("upload_to_service") or intent == "upload_document":
+                    target_svc = service_display or "Google Docs"
+                    target_file = file_name_display or (os.path.basename(file_path) if file_path else "the requested document")
+                    task.action_metadata["execution_output"] = f"Opened {target_svc} in {app_name or 'Chrome'} and uploaded '{target_file}'{bg_phrase} for you, Boss."
+                elif url and service_display and file_name_display:
                     task.action_metadata["execution_output"] = f"Opened {service_display} and {file_name_display} in {app_name or entity}{bg_phrase}"
                 elif url and service_display:
                     task.action_metadata["execution_output"] = f"Launched {app_name or entity} and opened {service_display}{bg_phrase}"

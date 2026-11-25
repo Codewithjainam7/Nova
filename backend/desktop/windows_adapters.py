@@ -102,7 +102,7 @@ class WindowsApplicationManager:
                         return
                     try:
                         _ensure_desktop()
-                        import win32gui, win32con, time
+                        import win32gui, win32con
                         time.sleep(1.5)
                         def cb(hwnd, _):
                             if win32gui.IsWindowVisible(hwnd):
@@ -158,10 +158,28 @@ class WindowsApplicationManager:
                 target_browser_kw = "chrome" if "chrome" in app_name_or_path.lower() else "brave" if "brave" in app_name_or_path.lower() else "edge" if "edge" in app_name_or_path.lower() else "browser"
 
                 if url:
-                    # 1. If browser window is already open, focus it and open a new tab directly
+                    # In background mode (e.g. user working in Antigravity or gaming),
+                    # NEVER steal focus or send simulated keystrokes to the foreground window.
+                    # Spawning the browser executable with the URL instructs Chrome/Brave/Edge's native IPC
+                    # to open the tab silently in the background while keeping Antigravity undisturbed.
+                    if is_background:
+                        browser_exe = _find_browser_exe(target_browser_kw)
+                        if browser_exe:
+                            import subprocess
+                            app_logger.info(f"Background launch: {browser_exe} -> {url}")
+                            cflags = 0x08000000  # CREATE_NO_WINDOW
+                            startupinfo = subprocess.STARTUPINFO()
+                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            startupinfo.wShowWindow = 7  # SW_SHOWMINNOACTIVE
+                            subprocess.Popen([browser_exe, url], creationflags=cflags, startupinfo=startupinfo)
+                            _restore_fg_if_background()
+                            return
+
+                    # 1. If browser window is already open and user is NOT in background mode,
+                    # focus it and open a new tab directly
                     try:
                         _ensure_desktop()
-                        import win32gui, win32con, time, pyautogui, pyperclip
+                        import win32gui, win32con, pyautogui, pyperclip
                         matched_hwnd = None
                         def find_cb(h, _):
                             nonlocal matched_hwnd
@@ -175,9 +193,8 @@ class WindowsApplicationManager:
                         win32gui.EnumWindows(find_cb, None)
                         if matched_hwnd:
                             app_logger.info(f"Existing browser window found ({hex(matched_hwnd)}). Opening new tab with {url}")
-                            if not is_background:
-                                win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
-                                win32gui.SetForegroundWindow(matched_hwnd)
+                            win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
+                            win32gui.SetForegroundWindow(matched_hwnd)
                             time.sleep(0.3)
                             pyautogui.hotkey('ctrl', 't')
                             time.sleep(0.3)
@@ -195,9 +212,6 @@ class WindowsApplicationManager:
                                 pyautogui.hotkey('ctrl', 'v')
                                 time.sleep(0.1)
                                 pyautogui.press('enter')
-
-                            if is_background:
-                                _restore_fg_if_background()
                             return
                     except Exception as e:
                         app_logger.warning(f"Active browser tab injection failed: {e}")

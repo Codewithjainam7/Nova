@@ -26,14 +26,15 @@ def find_latest_user_file(query_text: str) -> Optional[Dict[str, Any]]:
 
     # Clean query into matching tokens
     clean = re.sub(
-        r'\b(?:open|upload|the|latest|one|and|also|keep|it|i|want|to|work|my|file|document|folder|for|me|in|antigravity|now|only|chrome|docs|there|bakcgorund|background|not|on|screen|meant|that)\b',
+        r'\b(?:open|upload|the|latest|one|and|also|keep|it|i|want|to|work|my|file|document|folder|for|me|in|antigravity|now|only|chrome|docs|there|bakcgorund|background|not|on|screen|meant|that|bro|she|shuld|should|happens|ggoel|google|docu|docushe|upoaded|uploaded|just|like|instead|raw|browser|broswer|view|viewing|opening|oepning)\b',
         ' ',
         query_text,
         flags=re.IGNORECASE
     )
     tokens = [w.lower().strip() for w in clean.split() if len(w.strip()) > 1]
 
-    is_resume_query = any(k in query_text.lower() for k in ["resume", "cv", "biodata"])
+    is_resume_query = any(k in query_text.lower() for k in ["resume", "cv", "biodata", "devisri", "devi"])
+    is_docs_target = any(k in query_text.lower() for k in ["docs", "doc", "word", "docx", "google doc", "upload"])
 
     allowed_exts = {
         ".pdf", ".docx", ".doc", ".txt", ".xlsx", ".xls", ".pptx", ".ppt",
@@ -86,6 +87,9 @@ def find_latest_user_file(query_text: str) -> Optional[Dict[str, Any]]:
                     # Prefer Word docs or PDFs for resumes
                     if is_resume_query and ext in [".pdf", ".docx"]:
                         score += 5
+                        # If target is Google Docs or user wants to edit/upload to Docs, prefer native .docx over .pdf
+                        if is_docs_target and ext == ".docx":
+                            score += 15
 
                     if score > 0:
                         try:

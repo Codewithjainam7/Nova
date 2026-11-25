@@ -346,6 +346,14 @@ def clean_conversational_noise(query: str) -> str:
     stt_fixes = [
         (r'\ban\s+dkeep\b', 'and keep'),
         (r'\bdkeep\b', 'keep'),
+        (r'\bggoel\b', 'google'),
+        (r'\bbakcgorund\b', 'background'),
+        (r'\bbroswer\b', 'browser'),
+        (r'\boepning\b', 'opening'),
+        (r'\bshuld\b', 'should'),
+        (r'\bdocu\b', 'doc'),
+        (r'\bdocushe\b', 'doc she'),
+        (r'\bupoaded\b', 'uploaded'),
         (r'\bg\s+docs\b', 'gdocs'),
         (r'\bg\s+sheets\b', 'gsheets'),
         (r'\bg\s+drive\b', 'gdrive'),
@@ -357,6 +365,11 @@ def clean_conversational_noise(query: str) -> str:
 
     # 2. Strip personal context, reasons, and filler clauses
     filler_patterns = [
+        r'\b(?:in\s+bakcgorund\s+not\s+on\s+my\s+screen|in\s+background\s+not\s+on\s+my\s+screen|not\s+on\s+my\s+screen|not\s+on\s+screen)\b',
+        r'\b(?:in\s+bakcgorund|in\s+the\s+bakcgorund|keep\s+in\s+bakcgorund|keep\s+in\s+background|in\s+background|in\s+the\s+background)\b',
+        r'\b(?:just\s+like\s+happens\s+in\s+ggoel\s+docs|just\s+like\s+happens\s+in\s+google\s+docs)\b',
+        r'\b(?:not\s+oepning\s+that\s+docu\s+in\s+broswer|not\s+opening\s+that\s+docu\s+in\s+browser|not\s+opening\s+that\s+document\s+in\s+browser)\b',
+        r'\b(?:she\s+shuld\s+upload\s+and\s+open|she\s+should\s+upload\s+and\s+open)\b',
         r'\b(?:for\s+me\s+to\s+work|for\s+me\s+i\s+have\s+to\s+work|for\s+me\s+i\s+hv\s+to\s+work|for\s+me\s+i\s+got\s+to\s+work|so\s+i\s+can\s+work|i\s+have\s+to\s+work|i\s+hv\s+to\s+work|i\s+need\s+to\s+work|i\s+got\s+to\s+work|i\s+want\s+to\s+work|i\s+wanna\s+work|want\s+to\s+work)\b',
         r'\b(?:i\s+am\s+working\s+in\s+antigravity\s+for\s+now|i\s+am\s+working\s+in\s+antigravity|working\s+in\s+antigravity\s+for\s+now|working\s+in\s+antigravity)\b',
         r'\b(?:and\s+keep\s+it\s+open|keep\s+it\s+open|and\s+keep\s+open|keep\s+open)\b',
@@ -499,6 +512,14 @@ def extract_search_topic(query: str, browser_name: str = "") -> Tuple[str, str]:
     clean = re.sub(r'^\s*(?:and|then)\s+', '', clean, flags=re.IGNORECASE)
 
     clean_topic = ' '.join(clean.split()).strip()
+
+    # Critical Guard: If the extracted topic is actually a recognized web service or productivity app
+    # (e.g. Google Docs, Google Sheets, Google Drive, Gmail, YouTube, GitHub, etc.),
+    # NEVER convert it to a web search! Return the canonical service URL directly.
+    matched_svc = resolve_web_service(clean_topic)
+    if matched_svc:
+        return matched_svc["name"], matched_svc["url"]
+
     if clean_topic:
         encoded = urllib.parse.quote_plus(clean_topic)
         search_url = f"https://www.google.com/search?q={encoded}"

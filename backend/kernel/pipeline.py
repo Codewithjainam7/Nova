@@ -35,6 +35,10 @@ class KernelPipeline:
             from backend.verification.core import VerificationManager
             from backend.providers.schema import GenerationRequest, Message, Role, ProviderType
             
+            if not di_container.resolve(PlannerCore):
+                from backend.core.di import bootstrap_di
+                bootstrap_di()
+
             planner = di_container.resolve(PlannerCore)
             memory = di_container.resolve(MemoryEngine)
             provider_manager = di_container.resolve(AIProviderManager)

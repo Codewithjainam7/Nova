@@ -595,18 +595,21 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
 
             # Check for compound file attachment / upload / resume open intent
             # e.g. "and also upload the devisri resume the latest one and keep it open"
-            has_file_mention = any(k in q for k in ["resume", "cv", "upload", "attach", "file", "document", "docx", "pdf"])
+            has_file_mention = any(k in q for k in ["resume", "cv", "upload", "attach", "file", "document", "docx", "pdf", "devisri", "devi"])
             if has_file_mention:
                 matched_file = find_latest_user_file(query)
                 if matched_file:
-                    if is_browser_only or "upload" in q:
-                        # Open both docs and the file inside Chrome/browser tabs, without popping up separate desktop app
-                        file_uri = f"file:///{matched_file['path'].replace(os.sep, '/')}"
-                        tasks[0].action_metadata["additional_urls"] = [file_uri]
+                    is_upload_intent = any(k in q for k in ["upload", "in docs", "there in docs", "to docs", "into docs"])
+                    if is_upload_intent or is_browser_only:
+                        # Genuine Google Docs / web service upload & open workflow:
+                        # DO NOT just open raw file:/// PDF tab in browser.
+                        # Target service directly with file staging and background isolation.
+                        tasks[0].action_metadata["upload_to_service"] = True
                         tasks[0].action_metadata["file_path"] = matched_file["path"]
                         tasks[0].action_metadata["file_name"] = matched_file["filename"]
                         tasks[0].action_metadata["background"] = is_background
-                        tasks[0].description = f"Open {service_name} and {matched_file['filename']} in {target_app.capitalize()}" + (" in background" if is_background else "")
+                        tasks[0].action_metadata["intent"] = "upload_document"
+                        tasks[0].description = f"Upload '{matched_file['filename']}' to {service_name} in {target_app.capitalize()}" + (" in background" if is_background else "")
                         desc = tasks[0].description
                     else:
                         file_task = Task(
@@ -654,10 +657,17 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
 
         # Check for explicit web search query in browser
         # e.g. "search google for quantum physics", "search for latest ai models on chrome", "google black holes"
+        is_productivity_app = any(k in clean_lower for k in [
+            "google doc", "google sheet", "google slide", "google drive", "google cal", "google keep",
+            "google meet", "google form", "docs", "doc", "sheets", "sheet", "slides", "drive", "gdocs", "gmail"
+        ])
+
         is_explicit_search = (
-            any(s in clean_lower for s in ["search google for", "search for", "search web for", "google for", "look up"])
-            or (has_browser_mention and any(s in clean_lower for s in ["search", "google", "find"]))
-            or (clean_lower.startswith("search ") or clean_lower.startswith("google "))
+            (any(s in clean_lower for s in ["search google for", "search for", "search web for", "google for", "look up"])
+            or (has_browser_mention and any(s in clean_lower for s in ["search", "find"]) and not is_productivity_app)
+            or (clean_lower.startswith("search "))
+            or (clean_lower.startswith("google ") and not is_productivity_app))
+            and not is_productivity_app
         )
         if is_explicit_search:
             clean_topic, target_url = extract_search_topic(query, target_app)
