@@ -354,11 +354,16 @@ class KernelPipeline:
                 "my preferences", "do you remember me", "what do you know about me", "who are you",
                 "what can you do", "who made you", "your name", "who are we"
             ])
+            is_image_or_wallpaper = any(k in q_lower for k in [
+                "wallpaper", "walppaer", "walpaper", "4k photo", "4 k photo", "4k image", "4k pic",
+                "high quality photo", "highquality photo", "photos of", "pictures of", "images of"
+            ])
             is_search_intent = (
                 (any(marker in q_lower for marker in search_markers) or is_question) and
                 not is_explicit_browser and
                 not is_local_command and
                 not is_identity_or_profile_query and
+                not is_image_or_wallpaper and
                 len(user_intent.split()) >= 2
             )
             

@@ -262,7 +262,8 @@ class CapabilityRouter:
             if desktop_action_str == "APP_INTENT_EXECUTE" or intent in [
                 "calculate", "compute", "math", "write_note", "write", "type_text",
                 "save_file", "play_media", "navigate", "open_folder", "explore",
-                "organize", "organize_folder", "sort_folder", "clean_folder"
+                "organize", "organize_folder", "sort_folder", "clean_folder",
+                "install_software", "find_wallpaper", "set_wallpaper"
             ]:
                 action = DesktopAction(
                     action_type=DesktopActionType.APP_INTENT_EXECUTE,

@@ -76,7 +76,9 @@ IMPORTANT RULES:
    - If the user explicitly asks to open or search in a desktop browser window (e.g. 'open chrome and search quantum physics'), use "desktop" with app: "chrome", intent: "open_app", desktop_action: "APP_LAUNCH", and url: "https://www.google.com/search?q=<query>".
    - Otherwise, use "browser" or "background_search" in required_tools. If searching, provide "query" and set intent to "search".
 3. CRITICAL CONVERSATIONAL GUARD: If the user is just saying hello, asking a general knowledge question to be answered in chat, or chatting conversationally, DO NOT OUTPUT ANY DESKTOP OR BROWSER TASKS. Set tasks to an empty array [].
-4. If the user asks to search for news, maps, or background information to be displayed on the Nova workspace screen, use "background_search" in required_tools and provide "query" in action_metadata.
+4. WORKSPACE NEWS/MAP OVERLAY vs MEDIA/WALLPAPERS:
+   - ONLY use "background_search" when the user explicitly asks to display live world news or a geographic map widget on the HUD. NEVER use "background_search" for finding photos, images, 4K wallpapers, coding help, or desktop files!
+   - If the user asks to find, download, or set 4K photos/images/wallpapers (e.g. 'find 4k photos of Tony Stark', 'set cyberpunk wallpaper'): use "desktop" in required_tools with app: "media", intent: "find_wallpaper" (or "set_wallpaper"), entity: "<subject> 4k wallpaper", and desktop_action: "APP_INTENT_EXECUTE".
 5. If the user asks to interact with their phone (e.g., check battery, connect phone, pair phone, open app on phone, play a song or video on phone, send a message, transfer a file, or open/view a file/image on the phone), use "device" in required_tools. For pairing, set intent to "pair". For connecting, set intent to "connect". For battery, set intent to "get_battery". For opening an app, set intent to "open_app". For playing a song/video/media on the phone, MUST set intent to "play_media", provide the media name in "entity", and provide the target app (e.g. "youtube", "spotify") in "app" within action_metadata.
    - For sending a message (e.g. WhatsApp, Telegram, Instagram):
      DEFAULT PLATFORM RULE: If the user does not explicitly specify a platform (e.g. 'msg manav what is he doing', 'send message to mom', 'text jagrat are you free'), ALWAYS DEFAULT THE MESSAGING PLATFORM TO "whatsapp".
@@ -544,6 +546,46 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             )
             intent = Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query)
             goal = Goal(primary_goal=f"Download and install {target_name}")
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # 0.65. 4K Photo, Image & Wallpaper Finder / Setter Fast-Path
+        # e.g. "ada can u find some 4 k highquality photos of tony stark i want to ut it in walppaer in power shell and cmd so find fast"
+        is_media_intent = (
+            any(re.search(r'\b' + k + r'\b', clean_lower) for k in [
+                "wallpaper", "wallpapers", "photo", "photos", "image", "images", "pic", "pics", "picture", "pictures"
+            ])
+            and any(re.search(r'\b' + v + r'\b', clean_lower) for v in [
+                "find", "search", "get", "download", "fetch", "give", "show", "set", "change", "put", "apply", "4k", "hd"
+            ])
+            and not any(ex in clean_lower for ex in ["google photos", "screenshot", "resume", "phone", "mobile"])
+        )
+        if is_media_intent:
+            subj = clean_lower
+            # Drop trailing wallpaper application / shell clauses before extracting subject
+            subj = re.split(r'\b(?:i\s+want\s+to|i\s+wanna|put\s+it|so\s+find|in\s+powershell|in\s+cmd|in\s+wallpaper|as\s+(?:my\s+)?wallpaper|for\s+(?:my\s+)?wallpaper|on\s+desktop)\b', subj, maxsplit=1)[0]
+            subj = re.sub(r'\b(?:can\s+u|can\s+you|find\s+some|find\s+me|find|search\s+for|search|get\s+some|get\s+me|get|download|fetch|give\s+me|show\s+me|set|change|apply|some|high\s+quality|hd|4k|uhd|wallpapers?|photos?|images?|pics?|pictures?|of|for|the|a|an|fast|quickly|in)\b', ' ', subj)
+            subj = ' '.join(subj.split()).strip()
+            search_topic = f"{subj.title()} 4k wallpaper" if subj else "4k abstract wallpaper"
+
+            wants_auto_apply = (
+                any(re.search(r'\b' + v + r'\b', clean_lower) for v in ["set", "change", "apply"])
+                and not any(k in clean_lower for k in ["powershell", "cmd", "i want to put", "put it"])
+            )
+            media_intent = "set_wallpaper" if wants_auto_apply else "find_wallpaper"
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Find and download high-resolution 4K photos for '{search_topic}'",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "media",
+                    "intent": media_intent,
+                    "entity": search_topic,
+                    "desktop_action": "APP_INTENT_EXECUTE"
+                }
+            )
+            intent = Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query)
+            goal = Goal(primary_goal=f"Find 4K photos for {subj.title() or 'Wallpaper'}")
             return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
 
         # 1. Web Services, Productivity Suites, Browser Navigation, Search & YouTube Fast-Path
