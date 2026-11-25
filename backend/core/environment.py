@@ -1,6 +1,16 @@
 import os
+import sys
 from pathlib import Path
 from dotenv import load_dotenv
+
+def is_cloud_mode() -> bool:
+    """Returns True when ADA runs as an always-on cloud server without local Windows desktop access."""
+    mode = os.getenv("ADA_MODE", "").strip().lower()
+    if mode in ("cloud", "server", "headless"):
+        return True
+    if mode in ("local", "desktop"):
+        return False
+    return sys.platform != "win32"
 
 def load_environment():
     """

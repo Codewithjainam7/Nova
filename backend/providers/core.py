@@ -26,9 +26,13 @@ class AIProviderManager:
         self.streaming_manager = StreamingManager()
         self.health_monitor = ProviderHealthMonitor(self.registry)
         self._cooldowns = {}
+        self._bootstrapped = False
 
     def bootstrap(self):
-        """Register default/configured providers."""
+        """Register default/configured providers idempotently."""
+        if self._bootstrapped:
+            return
+        self._bootstrapped = True
         try:
             openrouter_provider = ProviderFactory.create(ProviderType.OPENROUTER)
             self.registry.register_provider(openrouter_provider)
@@ -83,45 +87,57 @@ class AIProviderManager:
             request.model = self._default_model_for_provider(provider.provider_type)
 
         retries_left = request.retry_count
-        
+        attempted_providers = {provider.provider_type}
+
         while retries_left >= 0:
             try:
                 self.metrics.requests_made += 1
                 await self.rate_limiter.wait_if_needed(provider.provider_type)
-                
+
                 app_logger.debug(f"Calling provider {provider.provider_type.value} (model: {request.model})")
-                
+
                 response = await asyncio.wait_for(provider.generate(request), timeout=request.timeout)
-                
+
                 # Record metrics
                 self.metrics.token_tracker.record_usage(provider.provider_type, response.usage)
                 return response
-                
+
             except asyncio.TimeoutError:
                 app_logger.error(f"Provider {provider.provider_type.value} timed out. Triggering immediate failover.")
                 retries_left = -1
             except Exception as e:
                 err_msg = str(e)
                 app_logger.error(f"Provider {provider.provider_type.value} failed: {err_msg}")
-                # Immediate failover on rate limits / quota exhaustion
-                if "429" in err_msg or "RESOURCE_EXHAUSTED" in err_msg or "quota" in err_msg.lower():
+                err_low = err_msg.lower()
+                # Immediate failover on rate limits, auth issues, or bad model IDs
+                if "429" in err_msg or "resource_exhausted" in err_low or "quota" in err_low:
                     app_logger.warning(f"Rate limit exceeded for {provider.provider_type.value}. Applying 10m cooldown.")
                     self._cooldowns[provider.provider_type] = time.time() + 600
                     retries_left = -1
+                elif any(k in err_low for k in ["404", "401", "403", "not_found", "not found", "does not exist", "invalid_api_key"]):
+                    app_logger.warning(f"Unrecoverable provider/model error on {provider.provider_type.value}. Failing over immediately.")
+                    self._cooldowns[provider.provider_type] = time.time() + 120
+                    retries_left = -1
                 else:
                     retries_left -= 1
-                
+
             if retries_left < 0:
-                # Trigger Fallback
+                # Trigger Fallback (cycle-safe)
                 self.metrics.fallbacks_triggered += 1
                 fallback_provider = self.fallback_manager.get_fallback(provider.provider_type)
-                if fallback_provider and fallback_provider != provider:
+                # Walk chain to find an unattempted provider
+                hops = 0
+                while fallback_provider and fallback_provider.provider_type in attempted_providers and hops < 4:
+                    fallback_provider = self.fallback_manager.get_fallback(fallback_provider.provider_type)
+                    hops += 1
+                if fallback_provider and fallback_provider.provider_type not in attempted_providers:
                     app_logger.warning(f"Failing over from {provider.provider_type.value} to {fallback_provider.provider_type.value}")
                     provider = fallback_provider
+                    attempted_providers.add(provider.provider_type)
                     request.model = self._default_model_for_provider(provider.provider_type)
-                    retries_left = request.retry_count # Reset retries for new provider
+                    retries_left = request.retry_count
                 else:
-                    app_logger.critical("All providers exhausted.")
+                    app_logger.critical("All AI providers exhausted.")
                     raise RuntimeError("All AI providers failed.")
                     
     async def generate_stream(self, request: GenerationRequest) -> AsyncGenerator[StreamingToken, None]:

@@ -55,116 +55,122 @@ async def lifespan(app: FastAPI):
     # Initialize Provider Manager
     provider_manager.bootstrap()
     
-    # Start Auto-ADB Scanner
-    try:
-        from backend.devices.core import DeviceManager
-        from backend.devices.auto_connect import start_auto_adb
-        app.state.zeroconf_tuple = start_auto_adb(DeviceManager())
-    except Exception as e:
-        app_logger.error(f"Failed to start Auto-ADB: {e}")
+    from backend.core.environment import is_cloud_mode
+    cloud_mode = is_cloud_mode()
 
-    # Start Autonomous "Hey ADA" Wake Word Engine
-    try:
-        from backend.voice.wake_word import WakeWordService
-        loop = asyncio.get_running_loop()
+    if not cloud_mode:
+        # Start Auto-ADB Scanner (Local mode only)
+        try:
+            from backend.devices.core import DeviceManager
+            from backend.devices.auto_connect import start_auto_adb
+            app.state.zeroconf_tuple = start_auto_adb(DeviceManager())
+        except Exception as e:
+            app_logger.error(f"Failed to start Auto-ADB: {e}")
 
-        async def _async_wake_detected(wake_phrase: str, directive: str, oral_text: str):
-            await events_ws_manager.broadcast(json.dumps({
-                "type": "WAKE_WORD_DETECTED",
-                "wake_phrase": wake_phrase,
-                "directive": directive,
-                "oral_response": oral_text
-            }))
+        # Start Autonomous "Hey ADA" Wake Word Engine (Local mode only)
+        try:
+            from backend.voice.wake_word import WakeWordService
+            loop = asyncio.get_running_loop()
 
-        async def _async_listening_state(msg: str):
-            if msg == "idle":
+            async def _async_wake_detected(wake_phrase: str, directive: str, oral_text: str):
                 await events_ws_manager.broadcast(json.dumps({
-                    "type": "RESPONSE_COMPLETED"
-                }))
-            else:
-                await events_ws_manager.broadcast(json.dumps({
-                    "type": "WAKE_WORD_LISTENING",
-                    "message": msg
+                    "type": "WAKE_WORD_DETECTED",
+                    "wake_phrase": wake_phrase,
+                    "directive": directive,
+                    "oral_response": oral_text
                 }))
 
-        async def _async_directive_ready(directive_text: str):
-            if not directive_text or not str(directive_text).strip():
-                return
-            directive_clean = str(directive_text).strip()
-            conv_id = "default"
-            app_logger.info(f"[WakeWord Dispatch] Executing directive: '{directive_clean}'")
+            async def _async_listening_state(msg: str):
+                if msg == "idle":
+                    await events_ws_manager.broadcast(json.dumps({
+                        "type": "RESPONSE_COMPLETED"
+                    }))
+                else:
+                    await events_ws_manager.broadcast(json.dumps({
+                        "type": "WAKE_WORD_LISTENING",
+                        "message": msg
+                    }))
 
-            user_msg = ChatMessage(type=ChatMessageType.USER, content=directive_clean)
-            await chat.add_message(conv_id, user_msg)
-            await chat_ws_manager.broadcast(json.dumps({
-                "type": "message_user",
-                "message": {
-                    "id": user_msg.message_id,
-                    "role": "user",
-                    "content": directive_clean,
-                    "timestamp": int(time.time() * 1000)
-                }
-            }))
+            async def _async_directive_ready(directive_text: str):
+                if not directive_text or not str(directive_text).strip():
+                    return
+                directive_clean = str(directive_text).strip()
+                conv_id = "default"
+                app_logger.info(f"[WakeWord Dispatch] Executing directive: '{directive_clean}'")
 
-            ast_msg = ChatMessage(type=ChatMessageType.ASSISTANT, content="")
-            await chat.add_message(conv_id, ast_msg)
-            await chat_ws_manager.broadcast(json.dumps({
-                "type": "message_chunk",
-                "message": {
-                    "id": ast_msg.message_id,
-                    "role": "assistant",
-                    "content": "Thinking..."
-                }
-            }))
+                user_msg = ChatMessage(type=ChatMessageType.USER, content=directive_clean)
+                await chat.add_message(conv_id, user_msg)
+                await chat_ws_manager.broadcast(json.dumps({
+                    "type": "message_user",
+                    "message": {
+                        "id": user_msg.message_id,
+                        "role": "user",
+                        "content": directive_clean,
+                        "timestamp": int(time.time() * 1000)
+                    }
+                }))
 
-            try:
-                req = KernelRequest(user_input=directive_clean, conversation_id=conv_id)
-                res = await kernel.dispatch(req)
-                ast_content = res.content if res and res.content else "Directive completed, Boss."
-            except Exception as ke:
-                app_logger.error(f"[WakeWord Dispatch] Kernel error: {ke}")
-                ast_content = f"Encountered an issue executing that command: {str(ke)}"
+                ast_msg = ChatMessage(type=ChatMessageType.ASSISTANT, content="")
+                await chat.add_message(conv_id, ast_msg)
+                await chat_ws_manager.broadcast(json.dumps({
+                    "type": "message_chunk",
+                    "message": {
+                        "id": ast_msg.message_id,
+                        "role": "assistant",
+                        "content": "Thinking..."
+                    }
+                }))
 
-            ast_msg.content = ast_content
-            await chat_ws_manager.broadcast(json.dumps({
-                "type": "message_complete",
-                "message": {
-                    "id": ast_msg.message_id,
-                    "role": "assistant",
-                    "content": ast_content
-                }
-            }))
+                try:
+                    req = KernelRequest(user_input=directive_clean, conversation_id=conv_id)
+                    res = await kernel.dispatch(req)
+                    ast_content = res.content if res and res.content else "Directive completed, Boss."
+                except Exception as ke:
+                    app_logger.error(f"[WakeWord Dispatch] Kernel error: {ke}")
+                    ast_content = f"Encountered an issue executing that command: {str(ke)}"
 
-        def _sync_wake(w: str, d: str, o: str):
-            asyncio.run_coroutine_threadsafe(_async_wake_detected(w, d, o), loop)
+                ast_msg.content = ast_content
+                await chat_ws_manager.broadcast(json.dumps({
+                    "type": "message_complete",
+                    "message": {
+                        "id": ast_msg.message_id,
+                        "role": "assistant",
+                        "content": ast_content
+                    }
+                }))
 
-        def _sync_listening_state(msg: str):
-            asyncio.run_coroutine_threadsafe(_async_listening_state(msg), loop)
+            def _sync_wake(w: str, d: str, o: str):
+                asyncio.run_coroutine_threadsafe(_async_wake_detected(w, d, o), loop)
 
-        def _sync_directive(d: str):
-            asyncio.run_coroutine_threadsafe(_async_directive_ready(d), loop)
+            def _sync_listening_state(msg: str):
+                asyncio.run_coroutine_threadsafe(_async_listening_state(msg), loop)
 
-        wake_service = WakeWordService(
-            on_wake_detected=_sync_wake,
-            on_listening_state=_sync_listening_state,
-            on_directive_ready=_sync_directive
-        )
-        wake_service.start()
-        app.state.wake_service = wake_service
-        app_logger.info("Autonomous Wake Word Listener Engine successfully initialized and active.")
-    except Exception as e:
-        app_logger.error(f"Failed to start Wake Word Engine: {e}")
+            def _sync_directive(d: str):
+                asyncio.run_coroutine_threadsafe(_async_directive_ready(d), loop)
+
+            wake_service = WakeWordService(
+                on_wake_detected=_sync_wake,
+                on_listening_state=_sync_listening_state,
+                on_directive_ready=_sync_directive
+            )
+            wake_service.start()
+            app.state.wake_service = wake_service
+            app_logger.info("Autonomous Wake Word Listener Engine successfully initialized and active.")
+        except Exception as e:
+            app_logger.error(f"Failed to start Wake Word Engine: {e}")
+
+        # Auto-start Cloudflare Remote Tunnel for Mobile Phone access (Local mode only)
+        try:
+            from backend.cloud.tunnel import tunnel_manager
+            asyncio.create_task(asyncio.to_thread(tunnel_manager.start_tunnel, 8000))
+        except Exception as te:
+            app_logger.warning(f"Failed to auto-start Cloudflare tunnel: {te}")
+    else:
+        app_logger.info("ADA running in 24/7 CLOUD mode (local hardware listeners skipped; awaiting Windows worker via /ws/worker).")
 
     app_logger.info(f"ADA Runtime Successfully Booted in {(time.time() - boot_time) * 1000:.2f}ms")
-    app_logger.info(f"Loaded Modules: SettingsSystem, NovaKernel, EventBus, ChatSystem, ProviderManager, AutoADB")
+    app_logger.info(f"Loaded Modules: SettingsSystem, NovaKernel, EventBus, ChatSystem, ProviderManager (cloud={cloud_mode})")
     app_logger.info(f"Version: 1.0.0, Environment: Production")
-    
-    # Auto-start Cloudflare Remote Tunnel for Mobile Phone access
-    try:
-        from backend.cloud.tunnel import tunnel_manager
-        asyncio.create_task(asyncio.to_thread(tunnel_manager.start_tunnel, 8000))
-    except Exception as te:
-        app_logger.warning(f"Failed to auto-start Cloudflare tunnel: {te}")
     
     yield
     
@@ -201,7 +207,36 @@ app.add_middleware(
 
 @app.get("/health")
 async def health_check():
-    return {"status": "ok"}
+    from backend.core.environment import is_cloud_mode
+    from backend.cloud.worker_relay import remote_worker_relay
+    return {
+        "status": "ok",
+        "mode": "cloud" if is_cloud_mode() else "local",
+        "windows_worker_online": remote_worker_relay.is_connected(),
+        "providers": [p.provider_type.value for p in provider_manager.registry.list_providers()],
+    }
+
+@app.websocket("/ws/worker")
+async def websocket_worker(websocket: WebSocket, token: Optional[str] = None):
+    """Outbound WebSocket bridge for local Windows worker agents."""
+    expected = os.getenv("ADA_WORKER_TOKEN", "").strip()
+    if expected and token != expected:
+        await websocket.close(code=1008)
+        return
+    await websocket.accept()
+    from backend.cloud.worker_relay import remote_worker_relay
+    await remote_worker_relay.register(websocket)
+    try:
+        while True:
+            raw = await websocket.receive_text()
+            msg = json.loads(raw)
+            if msg.get("type") == "TASK_RESULT":
+                remote_worker_relay.resolve_response(msg)
+    except WebSocketDisconnect:
+        await remote_worker_relay.unregister(websocket)
+    except Exception as e:
+        app_logger.warning(f"Worker WS closed: {e}")
+        await remote_worker_relay.unregister(websocket)
 
 from backend.routers.integrations import router as integrations_router
 app.include_router(integrations_router)

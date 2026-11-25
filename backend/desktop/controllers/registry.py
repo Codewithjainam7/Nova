@@ -7,6 +7,7 @@ from backend.desktop.controllers.notepad_controller import NotepadController
 from backend.desktop.controllers.file_explorer_controller import FileExplorerController
 from backend.desktop.controllers.software_controller import SoftwareInstallerController
 from backend.desktop.controllers.media_controller import MediaWallpaperController
+from backend.desktop.controllers.terminal_controller import TerminalWorkspaceController
 from backend.core.logger import app_logger
 
 class AppActionRouter:
@@ -20,6 +21,7 @@ class AppActionRouter:
         self.settings = SettingsController()
         self.installer = SoftwareInstallerController()
         self.media = MediaWallpaperController()
+        self.terminal = TerminalWorkspaceController()
         
         self.registry: Dict[str, AppController] = {
             "spotify": self.spotify,
@@ -42,6 +44,10 @@ class AppActionRouter:
             "wallpaper": self.media,
             "images": self.media,
             "photos": self.media,
+            "terminal": self.terminal,
+            "powershell": self.terminal,
+            "cmd": self.terminal,
+            "workspace": self.terminal,
         }
         self.last_output: Optional[str] = None
         
@@ -77,11 +83,12 @@ class AppActionRouter:
             
         app_logger.info(f"Routing intent '{intent}' for '{app_name}' to {controller.__class__.__name__}")
         
-        # 3. Ensure app is open and ready (skip for headless operations like folder organizing, installer, and media/wallpaper)
+        # 3. Ensure app is open and ready (skip for headless operations like folder organizing, installer, media, and terminal)
         headless_intents = {
             "organize", "organize_folder", "sort_folder", "clean_folder",
             "install_software", "download_and_install", "install", "download",
-            "find_wallpaper", "set_wallpaper", "find_images", "download_wallpaper"
+            "find_wallpaper", "set_wallpaper", "find_images", "download_wallpaper",
+            "create_workspace", "create_folder", "open_vscode", "system_diagnostics", "run_command"
         }
         if intent.lower().strip() not in headless_intents:
             if not controller.is_open():

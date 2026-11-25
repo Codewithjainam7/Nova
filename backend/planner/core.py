@@ -346,9 +346,71 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
                 except Exception as e:
                     app_logger.warning(f"Social message refinement failed: {e}")
 
-    def _heuristic_plan(self, query: str) -> Optional[Plan]:
+    def _try_compound_plan(self, query: str) -> Optional[Plan]:
+        """
+        Splits explicit multi-step user instructions (e.g. 'open docs in background and organize downloads',
+        'create folder demo on desktop and then calculate 45 * 12') into ordered Tasks when safe.
+        Skips tightly-coupled single-intent phrases (upload resume to docs, open browser + site, calculator/notepad).
+        """
+        q_low = query.lower().strip()
+        tight_single_patterns = [
+            "devisri", "upload", "powershell and cmd", "power shell and cmd",
+            "open calculator and", "open notepad and", "and keep", "an dkeep",
+            "download and install", "and install"
+        ]
+        if any(p in q_low for p in tight_single_patterns):
+            return None
+        # Keep "open <browser> and open <web_service>" or "create folder X and open in vs code" atomic
+        if re.search(r'\b(?:chrome|brave|edge|firefox|browser)\b.*\b(?:docs|sheets|slides|drive|gmail|github|chatgpt|claude|youtube|search|google)\b', q_low):
+            if not any(op in q_low for op in ["organize", "install", "calculate", "create folder"]):
+                return None
+        if re.search(r'\b(?:create|make)\s+(?:a\s+)?(?:new\s+)?(?:folder|directory|project)\b.*\b(?:vs\s*code|vscode)\b', q_low):
+            return None
+
+        clauses = re.split(
+            r'\s*(?:;|\band\s+then\b|,\s*then\b|,\s*and\b|\band\s+also\b|\band\s+(?=(?:open|launch|organize|organise|install|download|calculate|write|create|find|set|lock|check|msg|run)\b))\s*',
+            query.strip(),
+            flags=re.IGNORECASE,
+        )
+        clauses = [c.strip(" ,.") for c in clauses if c and len(c.strip(" ,.")) >= 3]
+        if len(clauses) < 2:
+            return None
+
+        global_bg = any(k in q_low for k in [
+            "in background", "in the background", "in bakcgorund", "not on my screen",
+            "working in antigravity", "i am working", "without disturbing"
+        ])
+
+        combined_tasks: List[Task] = []
+        for idx, clause in enumerate(clauses):
+            sub_plan = self._heuristic_plan(clause, allow_compound=False)
+            if not sub_plan or not sub_plan.tasks:
+                return None
+            for t in sub_plan.tasks:
+                if global_bg and t.action_metadata.get("app") in ["chrome", "brave", "edge", "firefox", "browser"]:
+                    t.action_metadata["background"] = True
+                if combined_tasks:
+                    t.dependencies = [combined_tasks[-1].task_id]
+                combined_tasks.append(t)
+
+        if len(combined_tasks) < 2:
+            return None
+
+        return Plan(
+            plan_id=str(uuid.uuid4()),
+            intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.97, raw_query=query),
+            goal=Goal(primary_goal=" & ".join([t.description for t in combined_tasks[:3]])),
+            tasks=combined_tasks,
+        )
+
+    def _heuristic_plan(self, query: str, allow_compound: bool = True) -> Optional[Plan]:
         """Heuristic rule-based planner for instant local automation."""
         q = query.lower().strip()
+
+        if allow_compound:
+            compound = self._try_compound_plan(query)
+            if compound:
+                return compound
 
         # 0.01. Instant Lock Laptop / PC Fast-Path (<5ms)
         if any(k in q for k in ["lock laptop", "lock my laptop", "lock the laptop", "lock pc", "lock my pc", "lock computer", "lock screen", "lock windows", "lock workstation"]) or q in ["lock", "lock system", "lock device"]:
@@ -510,43 +572,59 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
         is_download_or_install = any(re.search(r'\b' + re.escape(k) + r'\b', clean_lower) or re.search(r'\b' + re.escape(k) + r'\b', q) for k in [
             "download", "donwload", "install", "isntall", "instlal", "get the latest", "download the latest"
         ])
-        software_keywords = [
-            "android studio", "andriod studio", "androidstudio", "vs code", "vscode", "visual studio code",
-            "git", "nodejs", "node.js", "node js", "python", "flutter", "docker", "postman"
+        software_canonical = [
+            ("android studio", ["android studio", "andriod studio", "androidstudio"], "Android Studio"),
+            ("vs code", ["vs code", "vscode", "visual studio code"], "Visual Studio Code"),
+            ("git", ["git"], "Git"),
+            ("nodejs", ["nodejs", "node.js", "node js"], "Node.js"),
+            ("python", ["python"], "Python"),
+            ("flutter", ["flutter"], "Flutter"),
+            ("docker", ["docker"], "Docker Desktop"),
+            ("postman", ["postman"], "Postman"),
         ]
-        matched_software = None
-        for sw in software_keywords:
-            pat = r'\b' + re.escape(sw) + r'\b'
-            if re.search(pat, clean_lower) or re.search(pat, q):
-                matched_software = sw
-                break
+        matched_list = []
+        seen_sw = set()
+        for canon_id, aliases, display_name in software_canonical:
+            if canon_id in seen_sw:
+                continue
+            for sw in aliases:
+                pat = r'\b' + re.escape(sw) + r'\b'
+                if re.search(pat, clean_lower) or re.search(pat, q):
+                    matched_list.append((canon_id, display_name))
+                    seen_sw.add(canon_id)
+                    break
 
         # Explicitly handle installing browsers only when not just naming a browser target (avoid "in chrome")
-        if not matched_software and is_download_or_install:
+        if not matched_list and is_download_or_install:
             browser_sw_match = re.search(
                 r'\b(?:download|donwload|install|isntall|instlal)\s+(?:the\s+)?(?:latest\s+(?:version\s+of\s+)?)?(google\s+chrome|chrome|brave\s+browser|brave)\b',
                 clean_lower
             )
             if browser_sw_match:
-                matched_software = "chrome" if "chrome" in browser_sw_match.group(1) else "brave"
+                if "chrome" in browser_sw_match.group(1):
+                    matched_list.append(("chrome", "Google Chrome"))
+                else:
+                    matched_list.append(("brave", "Brave Browser"))
 
-        if is_download_or_install and matched_software:
-            target_name = "Android Studio" if ("android" in matched_software or "andriod" in matched_software) else matched_software.title()
-            task = Task(
-                task_id=str(uuid.uuid4()),
-                description=f"Download and install latest version of {target_name}",
-                required_tools=["desktop"],
-                risk=RiskLevel.LOW,
-                action_metadata={
-                    "app": "installer",
-                    "intent": "install_software",
-                    "entity": matched_software,
-                    "desktop_action": "APP_INTENT_EXECUTE"
-                }
-            )
+        if is_download_or_install and matched_list:
+            sw_tasks = []
+            for canon_id, target_name in matched_list:
+                sw_tasks.append(Task(
+                    task_id=str(uuid.uuid4()),
+                    description=f"Download and install latest version of {target_name}",
+                    required_tools=["desktop"],
+                    risk=RiskLevel.LOW,
+                    action_metadata={
+                        "app": "installer",
+                        "intent": "install_software",
+                        "entity": canon_id,
+                        "desktop_action": "APP_INTENT_EXECUTE"
+                    }
+                ))
+            names_joined = ", ".join([name for _, name in matched_list])
             intent = Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query)
-            goal = Goal(primary_goal=f"Download and install {target_name}")
-            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+            goal = Goal(primary_goal=f"Download and install {names_joined}")
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=sw_tasks)
 
         # 0.65. 4K Photo, Image & Wallpaper Finder / Setter Fast-Path
         # e.g. "ada can u find some 4 k highquality photos of tony stark i want to ut it in walppaer in power shell and cmd so find fast"
@@ -587,6 +665,58 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             intent = Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query)
             goal = Goal(primary_goal=f"Find 4K photos for {subj.title() or 'Wallpaper'}")
             return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # 0.7. Developer Workspace & Safe System Diagnostics Fast-Path
+        is_create_ws = bool(
+            re.search(r'\b(?:create|make)\s+(?:a\s+)?(?:new\s+)?(?:project\s+)?(?:folder|directory|workspace)\b', clean_lower)
+        )
+        if is_create_ws:
+            ws_spec = re.sub(
+                r'^(?:create|make)\s+(?:a\s+)?(?:new\s+)?(?:project\s+)?(?:folder|directory|workspace)\s*(?:called|named)?\s*',
+                '', clean_lower, flags=re.IGNORECASE
+            ).strip()
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Create developer workspace '{ws_spec or 'project'}'",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "terminal",
+                    "intent": "create_workspace",
+                    "entity": ws_spec or query,
+                    "desktop_action": "APP_INTENT_EXECUTE"
+                }
+            )
+            return Plan(
+                plan_id=str(uuid.uuid4()),
+                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.98, raw_query=query),
+                goal=Goal(primary_goal="Create developer workspace"),
+                tasks=[task]
+            )
+
+        is_diag = any(k in clean_lower for k in [
+            "open ports", "listening ports", "top processes", "top ram", "highest ram", "highest cpu",
+            "disk space", "disk usage", "storage space"
+        ])
+        if is_diag:
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description="Run read-only system diagnostics",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "terminal",
+                    "intent": "system_diagnostics",
+                    "entity": clean_lower,
+                    "desktop_action": "APP_INTENT_EXECUTE"
+                }
+            )
+            return Plan(
+                plan_id=str(uuid.uuid4()),
+                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.98, raw_query=query),
+                goal=Goal(primary_goal="System diagnostics"),
+                tasks=[task]
+            )
 
         # 1. Web Services, Productivity Suites, Browser Navigation, Search & YouTube Fast-Path
         clean_text = clean_conversational_noise(query)

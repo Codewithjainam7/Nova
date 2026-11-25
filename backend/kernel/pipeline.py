@@ -453,24 +453,38 @@ class KernelPipeline:
                         desc = task.description.lower()
                         app_logger.info(f"Task dispatch: tools={tools}, desc={task.description}")
 
-                        # Initialize CapabilityRouter and dependencies
-                        from backend.kernel.capability_router import CapabilityRouter
-                        from backend.providers.native_windows import NativeWindowsProvider
-                        from backend.devices.core import DeviceManager
-                        
-                        device_manager = DeviceManager()
-                        
-                        capability_router = CapabilityRouter(
-                            api_manager=api_manager,
-                            browser_engine=browser,
-                            desktop_engine=desktop,
-                            native_engine=NativeWindowsProvider(),
-                            device_manager=device_manager
-                        )
-                        
-                        # Route task
-                        app_logger.info(f"Routing task {task.task_id} via CapabilityRouter...")
-                        execution_result = await capability_router.route_task(task)
+                        # Cloud-mode worker relay for desktop/device tasks when running headless off-laptop
+                        from backend.core.environment import is_cloud_mode
+                        if is_cloud_mode() and any(tl in ("desktop", "device") for tl in tools):
+                            from backend.cloud.worker_relay import remote_worker_relay
+                            relay_res = await remote_worker_relay.dispatch_task(task.model_dump())
+                            task.action_metadata["execution_output"] = relay_res.get("output", "Executed via remote worker.")
+                            if relay_res.get("success") or relay_res.get("offline"):
+                                execution_result = True
+                            else:
+                                raise RuntimeError(relay_res.get("output", "Remote worker failed."))
+                        else:
+                            # Initialize CapabilityRouter and dependencies (local Windows mode)
+                            from backend.kernel.capability_router import CapabilityRouter
+                            from backend.devices.core import DeviceManager
+                            try:
+                                from backend.providers.native_windows import NativeWindowsProvider
+                                native_eng = NativeWindowsProvider()
+                            except Exception:
+                                native_eng = None
+
+                            device_manager = DeviceManager()
+                            capability_router = CapabilityRouter(
+                                api_manager=api_manager,
+                                browser_engine=browser,
+                                desktop_engine=desktop,
+                                native_engine=native_eng,
+                                device_manager=device_manager
+                            )
+
+                            # Route task
+                            app_logger.info(f"Routing task {task.task_id} via CapabilityRouter...")
+                            execution_result = await capability_router.route_task(task)
                         
                         if execution_result:
                             exec_out = task.action_metadata.get("execution_output", "")
@@ -619,15 +633,20 @@ class KernelPipeline:
             )
             
         except Exception as e:
-            app_logger.error(f"Pipeline error for session {session.session_id}: {str(e)}")
+            err_detail = str(e).strip() or e.__class__.__name__
+            app_logger.error(f"Pipeline error for session {session.session_id}: {err_detail}")
             session.update_state(KernelState.ERROR)
-            await self.event_bus.publish(KernelEventType.ERROR, str(e))
+            await self.event_bus.publish(KernelEventType.ERROR, err_detail)
+            if "provider" in err_detail.lower() or "api_key" in err_detail.lower():
+                friendly_msg = f"AI provider issue: {err_detail}. Please check your `.env` API keys or network connection."
+            else:
+                friendly_msg = f"I hit an execution issue: {err_detail}"
             return KernelResponse(
                 request_id=request.request_id,
                 session_id=session.session_id,
                 status=KernelState.ERROR,
-                content="Internal Engine Error",
-                error=str(e)
+                content=friendly_msg,
+                error=err_detail
             )
 
     async def _extract_and_learn(self, user_intent: str, assistant_response: str, memory, provider_manager):

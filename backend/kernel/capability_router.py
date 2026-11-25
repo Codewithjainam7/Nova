@@ -41,26 +41,44 @@ class CapabilityRouter:
         app_name = task.action_metadata.get("app", "").lower().strip()
         intent = task.action_metadata.get("intent", "").lower().strip()
         
-        # 0. Background Search & Workspace Render
+        # 0. Background Search & Workspace Render (Live WebResearchEngine - Zero Fake Mocks)
         if "background_search" in tools:
-            app_logger.info(f"Routing {task.task_id} to Background Search / Workspace")
+            app_logger.info(f"Routing {task.task_id} to live Background Search / Workspace")
             try:
-                from backend.main import events_ws_manager
+                from backend.search.web_research import WebResearchEngine
                 import json
                 query = task.action_metadata.get("query", task.description)
-                payload = {
-                    "type": "WORKSPACE_RENDER",
-                    "payload": {
-                        "query": query,
-                        "maps": [{"title": "Global Heatmap", "src": "heatmap"}],
-                        "news": [{"title": f"Latest updates on {query}", "source": "Reuters"}]
-                    }
-                }
-                await events_ws_manager.broadcast(json.dumps(payload))
-                task.action_metadata["execution_output"] = f"Rendered workspace for {query}"
+                research = WebResearchEngine()
+                results = await research.execute_search(query, max_results=5)
+                if results:
+                    news_items = [
+                        {
+                            "title": r.get("title", "Result"),
+                            "source": r.get("url", "Web"),
+                            "snippet": r.get("snippet", "")[:180],
+                        }
+                        for r in results[:5]
+                    ]
+                    try:
+                        from backend.main import events_ws_manager
+                        payload = {
+                            "type": "WORKSPACE_RENDER",
+                            "payload": {
+                                "query": query,
+                                "maps": [],
+                                "news": news_items,
+                            },
+                        }
+                        await events_ws_manager.broadcast(json.dumps(payload))
+                    except Exception:
+                        pass
+                    summary_lines = "\n".join([f"- **{n['title']}**: {n['source']}" for n in news_items[:3]])
+                    task.action_metadata["execution_output"] = f"Live web findings for '{query}':\n{summary_lines}"
+                else:
+                    task.action_metadata["execution_output"] = f"No live web results were returned for '{query}'."
                 return True
             except Exception as e:
-                app_logger.error(f"Failed to render workspace: {e}")
+                app_logger.error(f"Failed live background search: {e}")
                 return False
 
         # 0.5 Hermes Procedural Skill Engine
@@ -263,7 +281,8 @@ class CapabilityRouter:
                 "calculate", "compute", "math", "write_note", "write", "type_text",
                 "save_file", "play_media", "navigate", "open_folder", "explore",
                 "organize", "organize_folder", "sort_folder", "clean_folder",
-                "install_software", "find_wallpaper", "set_wallpaper"
+                "install_software", "find_wallpaper", "set_wallpaper",
+                "create_workspace", "create_folder", "open_vscode", "system_diagnostics", "run_command"
             ]:
                 action = DesktopAction(
                     action_type=DesktopActionType.APP_INTENT_EXECUTE,

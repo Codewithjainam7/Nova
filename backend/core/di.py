@@ -44,26 +44,21 @@ class DependencyInjectionContainer:
 di_container = DependencyInjectionContainer()
 
 def bootstrap_di():
-    # Import here to avoid circular dependencies
+    # Import core cloud-safe subsystems first
     from backend.planner.core import PlannerCore
-    from backend.planner.engines import (
-        MockLLMProvider, IntentDetector, GoalExtractor,
-        RiskDetector, TaskDecomposer, DependencyResolver,
-        ClarificationEngine
-    )
     from backend.memory.core import MemoryEngine
     from backend.providers.core import AIProviderManager
-    from backend.browser.core import BrowserEngine
-    from backend.desktop.core import DesktopEngine
-    from backend.vision.core import VisionEngine
-    from backend.voice.core import VoiceEngine
     from backend.chat.core import ChatSystem
     from backend.context.core import ContextEngine
     from backend.verification.core import VerificationManager
     from backend.verification.registry import VerificationRegistry
+    from backend.core.environment import load_environment, is_cloud_mode
+
+    load_environment()
 
     # Initialize Provider Manager early
     provider_manager = AIProviderManager()
+    provider_manager.bootstrap()
     di_container.register_singleton(AIProviderManager, provider_manager)
 
     # Initialize Verification dependencies
@@ -75,12 +70,23 @@ def bootstrap_di():
 
     di_container.register_singleton(PlannerCore, planner_core)
     di_container.register_singleton(MemoryEngine, MemoryEngine())
-    di_container.register_singleton(BrowserEngine, BrowserEngine())
-    di_container.register_singleton(DesktopEngine, DesktopEngine())
-    di_container.register_singleton(VisionEngine, VisionEngine())
-    di_container.register_singleton(VoiceEngine, VoiceEngine())
     di_container.register_singleton(ChatSystem, ChatSystem())
     di_container.register_singleton(ContextEngine, ContextEngine())
     di_container.register_singleton(VerificationManager, verification_manager)
-    
-    app_logger.info("DI Container bootstrapped with all Subsystems.")
+
+    # Local-only hardware/desktop/audio engines (skipped cleanly in cloud mode)
+    if not is_cloud_mode():
+        for mod_path, cls_name in [
+            ("backend.browser.core", "BrowserEngine"),
+            ("backend.desktop.core", "DesktopEngine"),
+            ("backend.vision.core", "VisionEngine"),
+            ("backend.voice.core", "VoiceEngine"),
+        ]:
+            try:
+                mod = __import__(mod_path, fromlist=[cls_name])
+                cls = getattr(mod, cls_name)
+                di_container.register_singleton(cls, cls())
+            except Exception as e:
+                app_logger.warning(f"Optional local subsystem {cls_name} skipped: {e}")
+
+    app_logger.info(f"DI Container bootstrapped (cloud_mode={is_cloud_mode()}).")
