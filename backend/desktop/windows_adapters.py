@@ -70,6 +70,7 @@ class WindowsApplicationManager:
                 is_background = bool(action.payload.get("background") or action.payload.get("keep_in_background"))
                 additional_urls = action.payload.get("additional_urls", [])
                 file_path_payload = action.payload.get("file_path") or action.payload.get("path")
+                upload_to_service = bool(action.payload.get("upload_to_service"))
 
                 # If a local file is provided, copy path to clipboard for instant upload / paste in browser
                 if file_path_payload and os.path.exists(file_path_payload):
@@ -95,6 +96,45 @@ class WindowsApplicationManager:
                             win32gui.SetForegroundWindow(current_fg)
                         except Exception:
                             pass
+
+                def _automate_docs_upload(fpath: str, is_bg: bool, orig_fg: Optional[int]):
+                    """Automates file upload picker sequence in Google Docs."""
+                    try:
+                        import win32gui, win32con, pyautogui, pyperclip
+                        time.sleep(2.5)
+                        c_hwnd = None
+                        def find_docs_cb(h, _):
+                            nonlocal c_hwnd
+                            if win32gui.IsWindowVisible(h):
+                                t = win32gui.GetWindowText(h).lower()
+                                if "google docs" in t and "chrome" in t:
+                                    c_hwnd = h
+                        win32gui.EnumWindows(find_docs_cb, None)
+                        if c_hwnd:
+                            rect = win32gui.GetWindowRect(c_hwnd)
+                            wx, wy = rect[0], rect[1]
+                            # Click folder icon (Open file picker)
+                            pyautogui.click(wx + 820, wy + 505)
+                            time.sleep(1.5)
+                            # Click Upload tab
+                            pyautogui.click(wx + 640, wy + 315)
+                            time.sleep(1.2)
+                            # Click Browse button
+                            pyautogui.click(wx + 516, wy + 607)
+                            time.sleep(1.0)
+                            # Paste file path and submit
+                            pyperclip.copy(fpath)
+                            pyautogui.hotkey('ctrl', 'v')
+                            time.sleep(0.3)
+                            pyautogui.press('enter')
+                            time.sleep(2.5)
+                            if is_bg and orig_fg:
+                                try:
+                                    win32gui.SetForegroundWindow(orig_fg)
+                                except Exception:
+                                    pass
+                    except Exception as ex:
+                        app_logger.warning(f"Google Docs upload automation notice: {ex}")
 
                 def _focus_window(title_substr: str):
                     if is_background:
@@ -173,6 +213,9 @@ class WindowsApplicationManager:
                             startupinfo.wShowWindow = 7  # SW_SHOWMINNOACTIVE
                             subprocess.Popen([browser_exe, url], creationflags=cflags, startupinfo=startupinfo)
                             _restore_fg_if_background()
+                            if upload_to_service and file_path_payload and "docs.google.com" in str(url) and "/document/d/" not in str(url):
+                                import threading
+                                threading.Thread(target=_automate_docs_upload, args=(file_path_payload, is_background, current_fg), daemon=True).start()
                             return
 
                     # 1. If browser window is already open and user is NOT in background mode,

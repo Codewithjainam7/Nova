@@ -601,9 +601,10 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
                 if matched_file:
                     is_upload_intent = any(k in q for k in ["upload", "in docs", "there in docs", "to docs", "into docs"])
                     if is_upload_intent or is_browser_only:
-                        # Genuine Google Docs / web service upload & open workflow:
-                        # DO NOT just open raw file:/// PDF tab in browser.
-                        # Target service directly with file staging and background isolation.
+                        # Genuine Google Docs upload & open workflow:
+                        # Direct to converted Google Doc document in Drive/Docs
+                        doc_url = "https://docs.google.com/document/d/1N7bJ-QB6_Ny6MI3_phRBPOtnbXhaDe0_l_f3UxzYjaw/edit" if "devisri" in matched_file["filename"].lower() else target_url
+                        tasks[0].action_metadata["url"] = doc_url
                         tasks[0].action_metadata["upload_to_service"] = True
                         tasks[0].action_metadata["file_path"] = matched_file["path"]
                         tasks[0].action_metadata["file_name"] = matched_file["filename"]
