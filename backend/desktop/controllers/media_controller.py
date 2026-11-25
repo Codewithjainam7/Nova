@@ -104,6 +104,18 @@ class MediaWallpaperController(AppController):
             with open(fpath, "wb") as f:
                 f.write(data)
 
+            # Convert .webp -> .jpg so Windows SystemParametersInfo / Wallpaper Registry works cleanly
+            if ext == ".webp":
+                try:
+                    from PIL import Image
+                    jpg_path = os.path.splitext(fpath)[0] + ".jpg"
+                    with Image.open(fpath) as im:
+                        im.convert("RGB").save(jpg_path, "JPEG", quality=95)
+                    os.remove(fpath)
+                    fpath = jpg_path
+                except Exception:
+                    pass
+
             return {
                 "path": fpath,
                 "url": img_url,
@@ -159,6 +171,8 @@ class MediaWallpaperController(AppController):
             )
             return True
 
+        # Prefer .jpg / .png for native Windows wallpaper compatibility
+        saved.sort(key=lambda s: (0 if s["path"].lower().endswith((".jpg", ".jpeg", ".png")) else 1))
         primary = saved[0]["path"]
         applied_msg = ""
         if intent.lower().strip() == "set_wallpaper":
