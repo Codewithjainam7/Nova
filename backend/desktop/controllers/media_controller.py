@@ -1,8 +1,8 @@
 """
 Media & Wallpaper Controller for ADA.
 Finds and downloads genuine high-resolution / 4K photos via silent backend search,
-saves them locally to Pictures/ADA_Wallpapers, and optionally applies desktop wallpaper
-or provides exact PowerShell/CMD commands for immediate use.
+saves wallpapers to D:\ADA_Wallpapers (or Downloads\ADA_Wallpapers fallback, never Pictures),
+and optionally applies desktop wallpaper or provides exact PowerShell/CMD commands.
 """
 
 import ctypes
@@ -136,6 +136,20 @@ class MediaWallpaperController(AppController):
             app_logger.warning(f"Wallpaper apply notice: {e}")
             return False
 
+    def _resolve_target_dir(self, intent: str, slug: str) -> str:
+        """Resolves destination folder: D:\\ADA_Wallpapers for wallpapers (fallback Downloads), Downloads\\Images for general photos."""
+        intent_low = (intent or "").lower().strip()
+        downloads_root = os.path.join(os.path.expanduser("~"), "Downloads")
+        if "image" in intent_low and "wallpaper" not in intent_low:
+            base = os.path.join(downloads_root, "Images")
+        elif os.path.exists("D:\\"):
+            base = r"D:\ADA_Wallpapers"
+        else:
+            base = os.path.join(downloads_root, "ADA_Wallpapers")
+        target = os.path.join(base, slug)
+        os.makedirs(target, exist_ok=True)
+        return target
+
     def execute(self, intent: str, entity: Optional[str]) -> bool:
         app_logger.info(f"MediaWallpaperController executing intent='{intent}' entity='{entity}'")
         self.last_output = None
@@ -143,8 +157,7 @@ class MediaWallpaperController(AppController):
         raw_topic = (entity or "4k wallpaper").strip()
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", raw_topic.lower()).strip("_")[:40] or "wallpaper"
 
-        pictures_dir = os.path.join(os.path.expanduser("~"), "Pictures", "ADA_Wallpapers", slug)
-        os.makedirs(pictures_dir, exist_ok=True)
+        dest_dir = self._resolve_target_dir(intent, slug)
 
         candidates = self._search_high_res_images(raw_topic, max_results=12)
         if not candidates:
@@ -154,7 +167,7 @@ class MediaWallpaperController(AppController):
         saved: List[Dict[str, Any]] = []
         with ThreadPoolExecutor(max_workers=4) as pool:
             futures = [
-                pool.submit(self._download_single, item, pictures_dir, slug, idx)
+                pool.submit(self._download_single, item, dest_dir, slug, idx)
                 for idx, item in enumerate(candidates[:8], 1)
             ]
             for fut in as_completed(futures):
@@ -195,7 +208,7 @@ class MediaWallpaperController(AppController):
 
         self.last_output = (
             f"{applied_msg}"
-            f"Downloaded {len(saved)} high-resolution 4K photos for '{raw_topic}' into `{pictures_dir}`:\n"
+            f"Downloaded {len(saved)} high-resolution 4K photos for '{raw_topic}' into `{dest_dir}`:\n"
             f"{files_summary}\n\n"
             f"PowerShell wallpaper command:\n```powershell\n{ps_cmd}\n```\n"
             f"CMD wallpaper command:\n```cmd\n{cmd_one_liner}\n```"
