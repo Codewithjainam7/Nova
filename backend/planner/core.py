@@ -54,10 +54,11 @@ IMPORTANT RULES:
    - For Spotify on PC: If user asks to play a song/artist/playlist on Spotify on PC (e.g. 'play sunflower on spotify'), use "desktop" in required_tools with app "spotify", intent "play_media", entity "<song/artist>", and desktop_action "APP_INTENT_EXECUTE".
    - For desktop apps & browsers (e.g. Chrome, Brave, Edge, Paint, Task Manager, VS Code): use "desktop" in required_tools with app "<name>", intent "open_app" (or "close_app"), and desktop_action "APP_LAUNCH".
    - PRODUCTIVITY SUITES & CANONICAL WEB SERVICES (Google Docs, Sheets, Slides, Drive, Gmail, GitHub, ChatGPT, Claude, etc.):
-     When the user asks to open a productivity suite or canonical service (e.g. 'open chrome and open google docs', 'open google sheets', 'open chatgpt', 'open github in browser'):
+     When the user asks to open a productivity suite or canonical service (e.g. 'open chrome and open google docs', 'open google sheets', 'open chatgpt', 'open github in browser', 'open docs in my chrome and keep'):
      NEVER search Google for the name of the service!
+     NEVER construct a Google search URL (https://www.google.com/search?q=...) for conversational filler, speech-to-text noise, or requests to open services!
      Always launch the browser with the canonical destination URL:
-     * Google Docs: "https://docs.google.com" (or "https://docs.new" if creating a new doc)
+     * Google Docs: "https://docs.google.com" (or "https://docs.new" if creating a new doc). NOTE: Spoken phrases like 'docs', 'dkeep docs', 'keep docs', 'doc', 'gdocs', 'google doc' ALWAYS mean Google Docs!
      * Google Sheets: "https://sheets.google.com" (or "https://sheets.new" if creating a new sheet)
      * Google Slides: "https://slides.google.com"
      * Google Drive: "https://drive.google.com"
@@ -67,11 +68,13 @@ IMPORTANT RULES:
      * ChatGPT: "https://chatgpt.com"
      * Claude: "https://claude.ai"
      * YouTube: "https://www.youtube.com" (or search results if a specific song/video query is requested)
-     Set required_tools: ["desktop"], app: "chrome" (or the browser requested), intent: "open_app", desktop_action: "APP_LAUNCH", and provide "url" in action_metadata. Strip conversational fluff (e.g. 'for me i hv to work', 'fast', 'please') from URLs.
+     Set required_tools: ["desktop"], app: "chrome" (or the browser requested), intent: "open_app", desktop_action: "APP_LAUNCH", and provide "url" in action_metadata. Strip conversational fluff (e.g. 'for me i hv to work', 'fast', 'please', 'i am working in antigravity') from URLs.
+     BACKGROUND EXECUTION: If user mentions 'in background', 'not on my screen', 'keep in background', 'and keep', 'keep it open', 'working in antigravity', or 'i am working', set "background": true in action_metadata.
 2. BROWSER AUTOMATION & WEB SEARCH:
-   - If user asks to SEARCH the web or lookup information (e.g. 'search Google for SpaceX launch', 'search web for Nvidia stock'):
-     If the user explicitly asks to open or search in a desktop browser window (e.g. 'open chrome and search quantum physics'), use "desktop" with app: "chrome", intent: "open_app", desktop_action: "APP_LAUNCH", and url: "https://www.google.com/search?q=<query>".
-     Otherwise, use "browser" or "background_search" in required_tools. If searching, provide "query" and set intent to "search".
+   - STRICT SEARCH CRITERIA: ONLY perform a web search if the user EXPLICITLY asks to SEARCH, LOOK UP, FIND, or GOOGLE something (e.g. 'search Google for SpaceX launch', 'search web for Nvidia stock', 'google black holes').
+   - NEVER convert general commands, application launches, or speech transcription errors (e.g. 'open chrome an dkeep docs me i hv to work there fast') into a Google search!
+   - If the user explicitly asks to open or search in a desktop browser window (e.g. 'open chrome and search quantum physics'), use "desktop" with app: "chrome", intent: "open_app", desktop_action: "APP_LAUNCH", and url: "https://www.google.com/search?q=<query>".
+   - Otherwise, use "browser" or "background_search" in required_tools. If searching, provide "query" and set intent to "search".
 3. CRITICAL CONVERSATIONAL GUARD: If the user is just saying hello, asking a general knowledge question to be answered in chat, or chatting conversationally, DO NOT OUTPUT ANY DESKTOP OR BROWSER TASKS. Set tasks to an empty array [].
 4. If the user asks to search for news, maps, or background information to be displayed on the Nova workspace screen, use "background_search" in required_tools and provide "query" in action_metadata.
 5. If the user asks to interact with their phone (e.g., check battery, connect phone, pair phone, open app on phone, play a song or video on phone, send a message, transfer a file, or open/view a file/image on the phone), use "device" in required_tools. For pairing, set intent to "pair". For connecting, set intent to "connect". For battery, set intent to "get_battery". For opening an app, set intent to "open_app". For playing a song/video/media on the phone, MUST set intent to "play_media", provide the media name in "entity", and provide the target app (e.g. "youtube", "spotify") in "app" within action_metadata.
@@ -497,6 +500,52 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             goal = Goal(primary_goal=f"Organize {target_folder.capitalize()} folder")
             return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
 
+        # 0.6. Software Download & Installation Fast-Path (Android Studio, VS Code, Git, Python, Node, Flutter, etc.)
+        # e.g. "donwload the lastest verion of andriod studio and install", "download the latest version of android studio and install"
+        clean_text = clean_conversational_noise(query)
+        clean_lower = clean_text.lower()
+
+        is_download_or_install = any(re.search(r'\b' + re.escape(k) + r'\b', clean_lower) or re.search(r'\b' + re.escape(k) + r'\b', q) for k in [
+            "download", "donwload", "install", "isntall", "instlal", "get the latest", "download the latest"
+        ])
+        software_keywords = [
+            "android studio", "andriod studio", "androidstudio", "vs code", "vscode", "visual studio code",
+            "git", "nodejs", "node.js", "node js", "python", "flutter", "docker", "postman"
+        ]
+        matched_software = None
+        for sw in software_keywords:
+            pat = r'\b' + re.escape(sw) + r'\b'
+            if re.search(pat, clean_lower) or re.search(pat, q):
+                matched_software = sw
+                break
+
+        # Explicitly handle installing browsers only when not just naming a browser target (avoid "in chrome")
+        if not matched_software and is_download_or_install:
+            browser_sw_match = re.search(
+                r'\b(?:download|donwload|install|isntall|instlal)\s+(?:the\s+)?(?:latest\s+(?:version\s+of\s+)?)?(google\s+chrome|chrome|brave\s+browser|brave)\b',
+                clean_lower
+            )
+            if browser_sw_match:
+                matched_software = "chrome" if "chrome" in browser_sw_match.group(1) else "brave"
+
+        if is_download_or_install and matched_software:
+            target_name = "Android Studio" if ("android" in matched_software or "andriod" in matched_software) else matched_software.title()
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Download and install latest version of {target_name}",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "installer",
+                    "intent": "install_software",
+                    "entity": matched_software,
+                    "desktop_action": "APP_INTENT_EXECUTE"
+                }
+            )
+            intent = Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query)
+            goal = Goal(primary_goal=f"Download and install {target_name}")
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
         # 1. Web Services, Productivity Suites, Browser Navigation, Search & YouTube Fast-Path
         clean_text = clean_conversational_noise(query)
         clean_lower = clean_text.lower()
@@ -557,11 +606,15 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             goal = Goal(primary_goal=desc)
             return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
 
-        # Check if user requested background mode (e.g. "keep in background", "not on my screen")
+        # Check if user requested background mode (e.g. "keep in background", "not on my screen", "and keep")
         is_background = any(k in q for k in [
             "in background", "in the background", "in bakcgorund", "keep in background",
             "keep in bakcgorund", "not on my screen", "dont show on screen", "don't show on screen",
-            "behind", "minimized", "in back", "in the back", "working in antigravity"
+            "behind", "minimized", "in back", "in the back", "working in antigravity",
+            "i am working", "i'm working", "am working", "working for now",
+            "and keep", "an dkeep", "keep it open", "keep open", "keep ready", "and keep it",
+            "for me i hv to work", "for me i have to work", "i hv to work", "i have to work",
+            "quietly", "silent", "silently", "without disturbing", "without switching"
         ])
         is_browser_only = any(k in q for k in ["only", "in chrome", "in brave", "in browser", "there in docs", "in docs"])
 

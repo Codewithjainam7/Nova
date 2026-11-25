@@ -312,7 +312,13 @@ class CapabilityRouter:
                 elif url and search_query:
                     task.action_metadata["execution_output"] = f"Launched {app_name or entity} and searched for '{search_query}'{bg_phrase}"
                 elif url:
-                    task.action_metadata["execution_output"] = f"Launched {app_name or entity} and navigated to {url}{bg_phrase}"
+                    if "google.com/search?q=" in str(url):
+                        import urllib.parse
+                        parsed = urllib.parse.parse_qs(urllib.parse.urlparse(str(url)).query)
+                        q_term = parsed.get("q", [""])[0].replace("+", " ")
+                        task.action_metadata["execution_output"] = f"Launched {app_name or entity} and searched Google for '{q_term}'{bg_phrase}"
+                    else:
+                        task.action_metadata["execution_output"] = f"Launched {app_name or entity} and navigated to {url}{bg_phrase}"
                 elif file_path:
                     fname = file_name_display or os.path.basename(file_path)
                     task.action_metadata["execution_output"] = f"Opened {fname}{bg_phrase}"

@@ -346,6 +346,17 @@ def clean_conversational_noise(query: str) -> str:
     stt_fixes = [
         (r'\ban\s+dkeep\b', 'and keep'),
         (r'\bdkeep\b', 'keep'),
+        (r'\ban\s+d\s+keep\b', 'and keep'),
+        (r'\bd\s*keep\s+docs\b', 'keep docs'),
+        (r'\bdocs\s+me\b', 'docs for me'),
+        (r'\bme\s+i\s+hv\s+to\s+work\b', 'i have to work'),
+        (r'\bi\s+hv\s+to\s+work\b', 'i have to work'),
+        (r'\bdonwload\b', 'download'),
+        (r'\blastest\b', 'latest'),
+        (r'\bverion\b', 'version'),
+        (r'\bandriod\b', 'android'),
+        (r'\bisntall\b', 'install'),
+        (r'\binstlal\b', 'install'),
         (r'\bggoel\b', 'google'),
         (r'\bbakcgorund\b', 'background'),
         (r'\bbroswer\b', 'browser'),
@@ -453,7 +464,7 @@ def resolve_web_service(query: str) -> Optional[Dict[str, Any]]:
     )
 
     # Check for "keep docs" voice artifact vs "google docs"
-    if "keep docs" in clean_q:
+    if any(k in clean_q for k in ["keep docs", "keep doc", "and keep docs", "dkeep docs", "an dkeep docs"]):
         # User said "keep docs" -> strongly maps to Google Docs in natural dictation
         # (or Google Keep if preceded by "notes")
         if "notes" in clean_q:

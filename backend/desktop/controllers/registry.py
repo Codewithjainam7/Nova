@@ -5,6 +5,7 @@ from backend.desktop.controllers.settings_controller import SettingsController
 from backend.desktop.controllers.calculator_controller import CalculatorController
 from backend.desktop.controllers.notepad_controller import NotepadController
 from backend.desktop.controllers.file_explorer_controller import FileExplorerController
+from backend.desktop.controllers.software_controller import SoftwareInstallerController
 from backend.core.logger import app_logger
 
 class AppActionRouter:
@@ -16,6 +17,7 @@ class AppActionRouter:
         self.file_explorer = FileExplorerController()
         self.spotify = SpotifyController()
         self.settings = SettingsController()
+        self.installer = SoftwareInstallerController()
         
         self.registry: Dict[str, AppController] = {
             "spotify": self.spotify,
@@ -28,6 +30,12 @@ class AppActionRouter:
             "explorer": self.file_explorer,
             "file explorer": self.file_explorer,
             "files": self.file_explorer,
+            "installer": self.installer,
+            "software": self.installer,
+            "winget": self.installer,
+            "package_manager": self.installer,
+            "install": self.installer,
+            "download": self.installer,
         }
         self.last_output: Optional[str] = None
         
@@ -63,8 +71,8 @@ class AppActionRouter:
             
         app_logger.info(f"Routing intent '{intent}' for '{app_name}' to {controller.__class__.__name__}")
         
-        # 3. Ensure app is open and ready (skip for headless operations like folder organizing)
-        headless_intents = {"organize", "organize_folder", "sort_folder", "clean_folder"}
+        # 3. Ensure app is open and ready (skip for headless operations like folder organizing and installer)
+        headless_intents = {"organize", "organize_folder", "sort_folder", "clean_folder", "install_software", "download_and_install", "install", "download"}
         if intent.lower().strip() not in headless_intents:
             if not controller.is_open():
                 app_logger.info(f"App {app_name} is not open, launching...")
@@ -77,7 +85,9 @@ class AppActionRouter:
         success = controller.execute(intent, entity)
         
         # 5. Extract output if available
-        if hasattr(controller, 'last_result') and controller.last_result:
+        if hasattr(controller, 'last_output') and controller.last_output:
+            self.last_output = controller.last_output
+        elif hasattr(controller, 'last_result') and controller.last_result:
             self.last_output = controller.last_result
         elif hasattr(controller, 'last_content') and controller.last_content:
             self.last_output = controller.last_content
