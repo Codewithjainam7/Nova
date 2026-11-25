@@ -357,9 +357,12 @@ def clean_conversational_noise(query: str) -> str:
 
     # 2. Strip personal context, reasons, and filler clauses
     filler_patterns = [
-        r'\b(?:for\s+me\s+to\s+work|for\s+me\s+i\s+have\s+to\s+work|for\s+me\s+i\s+hv\s+to\s+work|for\s+me\s+i\s+got\s+to\s+work|so\s+i\s+can\s+work|i\s+have\s+to\s+work|i\s+hv\s+to\s+work|i\s+need\s+to\s+work|i\s+got\s+to\s+work)\b',
+        r'\b(?:for\s+me\s+to\s+work|for\s+me\s+i\s+have\s+to\s+work|for\s+me\s+i\s+hv\s+to\s+work|for\s+me\s+i\s+got\s+to\s+work|so\s+i\s+can\s+work|i\s+have\s+to\s+work|i\s+hv\s+to\s+work|i\s+need\s+to\s+work|i\s+got\s+to\s+work|i\s+want\s+to\s+work|i\s+wanna\s+work|want\s+to\s+work)\b',
+        r'\b(?:i\s+am\s+working\s+in\s+antigravity\s+for\s+now|i\s+am\s+working\s+in\s+antigravity|working\s+in\s+antigravity\s+for\s+now|working\s+in\s+antigravity)\b',
+        r'\b(?:and\s+keep\s+it\s+open|keep\s+it\s+open|and\s+keep\s+open|keep\s+open)\b',
+        r'\b(?:and\s+keep)(?=\s+(?:and|open|also|$))\b',
         r'\b(?:me\s+i\s+have\s+to\s+work|me\s+i\s+hv\s+to\s+work|me\s+i\s+need\s+to\s+work|me\s+i\s+have\s+to|me\s+i\s+hv\s+to)\b',
-        r'\b(?:there\s+fast|fast|quickly|asap|right\s+now|immediately|hurry\s+up|real\s+quick|urgently)\b',
+        r'\b(?:there\s+fast|fast|quickly|asap|right\s+now|immediately|hurry\s+up|real\s+quick|urgently|for\s+now)\b',
         r'\b(?:for\s+me\s+to|for\s+me|for\s+myself|for\s+work)\b',
         r'\b(?:i\s+have\s+to|i\s+hv\s+to|i\s+need\s+to|i\s+want\s+to|i\s+wanna|i\s+got\s+to|so\s+that\s+i\s+can)\b',
         r'\b(?:there|in\s+there)\b(?=\s*$)',  # only 'there' at end of sentence

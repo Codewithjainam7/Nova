@@ -12,6 +12,7 @@ from backend.services.web_service_registry import (
     clean_conversational_noise,
     extract_search_topic
 )
+from backend.services.file_resolver import find_latest_user_file
 
 class PlannerCore:
     """
@@ -556,6 +557,14 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             goal = Goal(primary_goal=desc)
             return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
 
+        # Check if user requested background mode (e.g. "keep in background", "not on my screen")
+        is_background = any(k in q for k in [
+            "in background", "in the background", "in bakcgorund", "keep in background",
+            "keep in bakcgorund", "not on my screen", "dont show on screen", "don't show on screen",
+            "behind", "minimized", "in back", "in the back", "working in antigravity"
+        ])
+        is_browser_only = any(k in q for k in ["only", "in chrome", "in brave", "in browser", "there in docs", "in docs"])
+
         # If a web service was matched (Docs, Sheets, Drive, Gmail, GitHub, ChatGPT, Claude, Netflix, etc.)
         if matched_service:
             target_url = matched_service["url"]
@@ -564,23 +573,84 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
                 desc = f"Launch {target_app.capitalize()} and create new document in {service_name}"
             else:
                 desc = f"Launch {target_app.capitalize()} and navigate to {service_name}"
+            if is_background:
+                desc += " in background"
 
-            task = Task(
-                task_id=str(uuid.uuid4()),
-                description=desc,
-                required_tools=["desktop"],
-                risk=RiskLevel.LOW,
-                action_metadata={
-                    "app": target_app,
-                    "intent": "open_app",
-                    "desktop_action": "APP_LAUNCH",
-                    "url": target_url,
-                    "service": service_name
-                }
-            )
+            tasks = [
+                Task(
+                    task_id=str(uuid.uuid4()),
+                    description=desc,
+                    required_tools=["desktop"],
+                    risk=RiskLevel.LOW,
+                    action_metadata={
+                        "app": target_app,
+                        "intent": "open_app",
+                        "desktop_action": "APP_LAUNCH",
+                        "url": target_url,
+                        "service": service_name,
+                        "background": is_background
+                    }
+                )
+            ]
+
+            # Check for compound file attachment / upload / resume open intent
+            # e.g. "and also upload the devisri resume the latest one and keep it open"
+            has_file_mention = any(k in q for k in ["resume", "cv", "upload", "attach", "file", "document", "docx", "pdf"])
+            if has_file_mention:
+                matched_file = find_latest_user_file(query)
+                if matched_file:
+                    if is_browser_only or "upload" in q:
+                        # Open both docs and the file inside Chrome/browser tabs, without popping up separate desktop app
+                        file_uri = f"file:///{matched_file['path'].replace(os.sep, '/')}"
+                        tasks[0].action_metadata["additional_urls"] = [file_uri]
+                        tasks[0].action_metadata["file_path"] = matched_file["path"]
+                        tasks[0].action_metadata["file_name"] = matched_file["filename"]
+                        tasks[0].action_metadata["background"] = is_background
+                        tasks[0].description = f"Open {service_name} and {matched_file['filename']} in {target_app.capitalize()}" + (" in background" if is_background else "")
+                        desc = tasks[0].description
+                    else:
+                        file_task = Task(
+                            task_id=str(uuid.uuid4()),
+                            description=f"Open {matched_file['filename']}",
+                            required_tools=["desktop"],
+                            risk=RiskLevel.LOW,
+                            action_metadata={
+                                "app": "explorer",
+                                "intent": "open_file",
+                                "desktop_action": "APP_LAUNCH",
+                                "path": matched_file["path"],
+                                "file_name": matched_file["filename"],
+                                "background": is_background
+                            }
+                        )
+                        tasks.append(file_task)
+                        desc = f"Launch {target_app.capitalize()} with {service_name} and open {matched_file['filename']}"
+
             intent = Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.99, raw_query=query)
             goal = Goal(primary_goal=desc)
-            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+            return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=tasks)
+
+        # Standalone File / Resume Launch
+        # e.g. "open devisri resume", "open latest resume", "upload the devisri resume"
+        if any(k in q for k in ["resume", "cv", "upload ", "open file", "open document"]):
+            matched_file = find_latest_user_file(query)
+            if matched_file:
+                file_task = Task(
+                    task_id=str(uuid.uuid4()),
+                    description=f"Open {matched_file['filename']}",
+                    required_tools=["desktop"],
+                    risk=RiskLevel.LOW,
+                    action_metadata={
+                        "app": "explorer",
+                        "intent": "open_file",
+                        "desktop_action": "APP_LAUNCH",
+                        "path": matched_file["path"],
+                        "file_name": matched_file["filename"]
+                    }
+                )
+                intent = Intent(primary_intent=IntentType.LAUNCH_APPLICATION, confidence=0.99, raw_query=query)
+                goal = Goal(primary_goal=f"Open {matched_file['filename']}")
+                return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[file_task])
 
         # Check for explicit web search query in browser
         # e.g. "search google for quantum physics", "search for latest ai models on chrome", "google black holes"

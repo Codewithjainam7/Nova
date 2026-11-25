@@ -1,3 +1,4 @@
+import os
 from typing import List, Dict, Any, Optional
 from backend.core.logger import app_logger
 from backend.services.api_registry import get_integration, ExecutionEngine
@@ -277,24 +278,42 @@ class CapabilityRouter:
                     task.action_metadata["execution_output"] = f"Successfully executed {intent} on {app_name}"
                 return True
                 
-            # 2. Window Launch & Close
-            elif intent == "open_app" or desktop_action_str == "APP_LAUNCH":
+            # 2. Window & File Launch / Close
+            elif intent in ["open_app", "open_file"] or desktop_action_str == "APP_LAUNCH":
+                file_path = meta.get("path")
                 payload = {"name": app_name or entity}
+                if file_path:
+                    payload["path"] = file_path
+                if meta.get("file_path"):
+                    payload["file_path"] = meta.get("file_path")
+                if meta.get("additional_urls"):
+                    payload["additional_urls"] = meta.get("additional_urls")
+                if meta.get("background"):
+                    payload["background"] = meta.get("background")
                 if url:
                     payload["url"] = url
                 action = DesktopAction(action_type=DesktopActionType.APP_LAUNCH, payload=payload)
                 await self.desktop_engine.perform_action(action)
-                if url:
-                    service_display = meta.get("service")
-                    search_query = meta.get("query")
-                    if service_display:
-                        task.action_metadata["execution_output"] = f"Launched {app_name or entity} and opened {service_display}"
-                    elif search_query:
-                        task.action_metadata["execution_output"] = f"Launched {app_name or entity} and searched for '{search_query}'"
-                    else:
-                        task.action_metadata["execution_output"] = f"Launched {app_name or entity} and navigated to {url}"
+
+                service_display = meta.get("service")
+                search_query = meta.get("query")
+                file_name_display = meta.get("file_name")
+                is_bg = meta.get("background")
+                bg_phrase = " in the background" if is_bg else ""
+
+                if url and service_display and file_name_display:
+                    task.action_metadata["execution_output"] = f"Opened {service_display} and {file_name_display} in {app_name or entity}{bg_phrase}"
+                elif url and service_display:
+                    task.action_metadata["execution_output"] = f"Launched {app_name or entity} and opened {service_display}{bg_phrase}"
+                elif url and search_query:
+                    task.action_metadata["execution_output"] = f"Launched {app_name or entity} and searched for '{search_query}'{bg_phrase}"
+                elif url:
+                    task.action_metadata["execution_output"] = f"Launched {app_name or entity} and navigated to {url}{bg_phrase}"
+                elif file_path:
+                    fname = file_name_display or os.path.basename(file_path)
+                    task.action_metadata["execution_output"] = f"Opened {fname}{bg_phrase}"
                 else:
-                    task.action_metadata["execution_output"] = f"Launched {app_name or entity}"
+                    task.action_metadata["execution_output"] = f"Launched {app_name or entity}{bg_phrase}"
                 return True
                 
             elif intent == "close_app" or desktop_action_str == "APP_CLOSE":

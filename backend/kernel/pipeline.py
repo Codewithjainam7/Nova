@@ -4,6 +4,7 @@ from backend.kernel.events import KernelEventBus, KernelEventType
 from backend.core.logger import app_logger
 from backend.core.di import di_container
 import os
+import time
 import asyncio
 import json
 
@@ -497,13 +498,17 @@ class KernelPipeline:
             
             # If the task was purely automation or device, produce a clean confirmation
             if any(t in tools_used for t in ["desktop", "browser", "device"]):
-                device_out = None
+                outputs = []
                 if plan and plan.tasks:
                     for t in plan.tasks:
-                        if t.action_metadata.get("execution_output"):
-                            device_out = t.action_metadata["execution_output"]
-                if device_out and isinstance(device_out, str):
-                    final_response_text = device_out
+                        out = t.action_metadata.get("execution_output")
+                        if out and isinstance(out, str):
+                            outputs.append(out)
+                if outputs:
+                    if len(outputs) == 1:
+                        final_response_text = outputs[0]
+                    else:
+                        final_response_text = ", and ".join(outputs)
                 else:
                     final_response_text = "Done, Boss. I've executed the requested action for you."
                 app_logger.info(f"Automation intent response: {final_response_text}")

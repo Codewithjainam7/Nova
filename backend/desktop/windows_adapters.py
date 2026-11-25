@@ -3,7 +3,7 @@ import os
 import shutil
 import psutil
 import time
-from typing import Any
+from typing import Any, Optional, Dict, List
 from backend.core.logger import app_logger
 from backend.desktop.schema import DesktopAction, DesktopActionType
 
@@ -67,7 +67,39 @@ class WindowsApplicationManager:
                 if not url and action.payload.get("entity") and "http" in str(action.payload.get("entity")):
                     url = action.payload.get("entity")
 
+                is_background = bool(action.payload.get("background") or action.payload.get("keep_in_background"))
+                additional_urls = action.payload.get("additional_urls", [])
+                file_path_payload = action.payload.get("file_path") or action.payload.get("path")
+
+                # If a local file is provided, copy path to clipboard for instant upload / paste in browser
+                if file_path_payload and os.path.exists(file_path_payload):
+                    try:
+                        import pyperclip
+                        pyperclip.copy(file_path_payload)
+                        app_logger.info(f"Copied file path to clipboard for instant upload: {file_path_payload}")
+                    except Exception:
+                        pass
+
+                current_fg = None
+                try:
+                    import win32gui
+                    current_fg = win32gui.GetForegroundWindow()
+                except Exception:
+                    pass
+
+                def _restore_fg_if_background():
+                    if is_background and current_fg:
+                        time.sleep(0.4)
+                        try:
+                            import win32gui
+                            win32gui.SetForegroundWindow(current_fg)
+                        except Exception:
+                            pass
+
                 def _focus_window(title_substr: str):
+                    if is_background:
+                        _restore_fg_if_background()
+                        return
                     try:
                         _ensure_desktop()
                         import win32gui, win32con, time
@@ -143,8 +175,9 @@ class WindowsApplicationManager:
                         win32gui.EnumWindows(find_cb, None)
                         if matched_hwnd:
                             app_logger.info(f"Existing browser window found ({hex(matched_hwnd)}). Opening new tab with {url}")
-                            win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
-                            win32gui.SetForegroundWindow(matched_hwnd)
+                            if not is_background:
+                                win32gui.ShowWindow(matched_hwnd, win32con.SW_RESTORE)
+                                win32gui.SetForegroundWindow(matched_hwnd)
                             time.sleep(0.3)
                             pyautogui.hotkey('ctrl', 't')
                             time.sleep(0.3)
@@ -152,6 +185,19 @@ class WindowsApplicationManager:
                             pyautogui.hotkey('ctrl', 'v')
                             time.sleep(0.1)
                             pyautogui.press('enter')
+
+                            # Open any additional URLs in extra tabs
+                            for a_url in additional_urls:
+                                time.sleep(0.3)
+                                pyautogui.hotkey('ctrl', 't')
+                                time.sleep(0.2)
+                                pyperclip.copy(a_url)
+                                pyautogui.hotkey('ctrl', 'v')
+                                time.sleep(0.1)
+                                pyautogui.press('enter')
+
+                            if is_background:
+                                _restore_fg_if_background()
                             return
                     except Exception as e:
                         app_logger.warning(f"Active browser tab injection failed: {e}")
@@ -160,16 +206,32 @@ class WindowsApplicationManager:
                     browser_exe = _find_browser_exe(target_browser_kw)
                     if browser_exe:
                         import subprocess
-                        app_logger.info(f"Launching {browser_exe} directly with URL: {url}")
+                        app_logger.info(f"Launching {browser_exe} directly with URL: {url} (background={is_background})")
                         cflags = 0x08000000  # CREATE_NO_WINDOW
-                        subprocess.Popen([browser_exe, url], creationflags=cflags)
-                        _focus_window(target_browser_kw)
+                        launch_cmd = [browser_exe, url]
+                        if additional_urls and isinstance(additional_urls, list):
+                            launch_cmd.extend(additional_urls)
+
+                        startupinfo = None
+                        if is_background:
+                            startupinfo = subprocess.STARTUPINFO()
+                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            startupinfo.wShowWindow = 7  # SW_SHOWMINNOACTIVE
+
+                        subprocess.Popen(launch_cmd, creationflags=cflags, startupinfo=startupinfo)
+                        if is_background:
+                            _restore_fg_if_background()
+                        else:
+                            _focus_window(target_browser_kw)
                         return
 
                     try:
                         app_logger.info(f"Opening URL via default browser: {url}")
                         os.startfile(url)
-                        _focus_window(app_name_or_path or "browser")
+                        if is_background:
+                            _restore_fg_if_background()
+                        else:
+                            _focus_window(app_name_or_path or "browser")
                         return
                     except Exception as e:
                         app_logger.warning(f"os.startfile({url}) failed: {e}")
@@ -180,17 +242,30 @@ class WindowsApplicationManager:
                     browser_exe = _find_browser_exe(target_browser_kw)
                     if browser_exe:
                         import subprocess
-                        app_logger.info(f"Launching browser directly: {browser_exe}")
+                        app_logger.info(f"Launching browser directly: {browser_exe} (background={is_background})")
                         cflags = 0x08000000  # CREATE_NO_WINDOW
-                        subprocess.Popen([browser_exe], creationflags=cflags)
-                        _focus_window(target_browser_kw)
+                        startupinfo = None
+                        if is_background:
+                            startupinfo = subprocess.STARTUPINFO()
+                            startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+                            startupinfo.wShowWindow = 7  # SW_SHOWMINNOACTIVE
+                        subprocess.Popen([browser_exe], creationflags=cflags, startupinfo=startupinfo)
+                        if is_background:
+                            _restore_fg_if_background()
+                        else:
+                            _focus_window(target_browser_kw)
                         return
 
                 try:
-                    app_logger.info(f"Trying os.startfile({exe_name})")
-                    os.startfile(exe_name)
-                    app_logger.info("os.startfile succeeded")
-                    _focus_window(app_name_or_path)
+                    app_logger.info(f"Trying os.startfile({exe_name}) (background={is_background})")
+                    if is_background:
+                        import win32api, win32con
+                        win32api.ShellExecute(0, "open", exe_name, None, None, win32con.SW_SHOWMINNOACTIVE)
+                        _restore_fg_if_background()
+                    else:
+                        os.startfile(exe_name)
+                        app_logger.info("os.startfile succeeded")
+                        _focus_window(app_name_or_path)
                 except Exception as e:
                     app_logger.warning(f"os.startfile failed: {e}. Falling back to pywinauto.")
                     # fallback to pywinauto if it's an exe that needs hooking
