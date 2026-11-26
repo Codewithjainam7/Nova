@@ -88,6 +88,7 @@ class AppActionRouter:
         # 3. Ensure app is open and ready (skip for headless operations like folder organizing, installer, media, and terminal)
         headless_intents = {
             "organize", "organize_folder", "sort_folder", "clean_folder",
+            "delete_files", "delete_file", "delete_screenshots", "remove_files", "clear_files", "delete", "remove",
             "install_software", "download_and_install", "install", "download",
             "find_wallpaper", "set_wallpaper", "find_images", "download_wallpaper",
             "create_collage", "make_collage",

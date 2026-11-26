@@ -50,6 +50,7 @@ IMPORTANT RULES:
    - For File Explorer & Folder Organization:
      If user asks to open a folder (e.g. 'open downloads folder', 'open documents'), use "desktop" in required_tools with app "explorer", intent "open_folder", entity "<folder_name>", and desktop_action "APP_INTENT_EXECUTE".
      If user asks to ORGANIZE, sort, or clean up a folder (e.g. 'organize my downloads', 'organize downloads folder by creating folders', 'sort my downloads', 'organize my files'): use "desktop" in required_tools with app "explorer", intent "organize_folder", entity "<folder_name>" (default "downloads"), and desktop_action "APP_INTENT_EXECUTE". NEVER just open the folder when the user specifically asks to organize it!
+     If the user asks to DELETE or clear files in a folder (e.g. 'delete all screenshots from November', 'delete pdf files in downloads'): ALWAYS run headlessly in the background with app "explorer", intent "delete_files", entity "<full description/filters>", and desktop_action "APP_INTENT_EXECUTE". NEVER open File Explorer on screen!
    - For Windows Settings: If user asks to open settings or check updates/display/bluetooth, use "desktop" in required_tools with app "settings", intent "navigate", entity "<section_name>", and desktop_action "APP_INTENT_EXECUTE".
    - For Spotify on PC: If user asks to play a song/artist/playlist on Spotify on PC (e.g. 'play sunflower on spotify'), use "desktop" in required_tools with app "spotify", intent "play_media", entity "<song/artist>", and desktop_action "APP_INTENT_EXECUTE".
    - For desktop apps & browsers (e.g. Chrome, Brave, Edge, Paint, Task Manager, VS Code): use "desktop" in required_tools with app "<name>", intent "open_app" (or "close_app"), and desktop_action "APP_LAUNCH".
@@ -564,6 +565,32 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             intent = Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query)
             goal = Goal(primary_goal=f"Organize {target_folder.capitalize()} folder")
             return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=[task])
+
+        # 0.55. Headless File Deletion & Cleanup Fast-Path (zero File Explorer windows on screen)
+        is_delete_files = (
+            any(re.search(r'\b' + v + r'\b', q) for v in ["delete", "remove", "clear", "clean out", "wipe"])
+            and any(f in q for f in ["screenshot", "screenshots", "file", "files", ".png", ".jpg", ".pdf", "downloads", "pictures", "documents", "folder"])
+            and not any(blk in q for blk in ["recycle bin", "c drive", "system32", "windows folder"])
+        )
+        if is_delete_files:
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Delete matching files silently in background ({query[:80]})",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "explorer",
+                    "intent": "delete_files",
+                    "entity": query,
+                    "desktop_action": "APP_INTENT_EXECUTE"
+                }
+            )
+            return Plan(
+                plan_id=str(uuid.uuid4()),
+                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query),
+                goal=Goal(primary_goal="Delete requested files silently in background"),
+                tasks=[task]
+            )
 
         # 0.6. Software Download & Installation Fast-Path (Android Studio, VS Code, Git, Python, Node, Flutter, etc.)
         # e.g. "donwload the lastest verion of andriod studio and install", "download the latest version of android studio and install"

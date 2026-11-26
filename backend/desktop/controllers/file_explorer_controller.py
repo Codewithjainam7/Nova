@@ -269,12 +269,211 @@ class FileExplorerController(AppController):
         app_logger.info(f"[FileExplorer] {self.last_result}")
         return True
 
+    def _recycle_files_silently(self, file_paths: List[str]) -> int:
+        """Moves files silently to the Windows Recycle Bin (100% background, undoable)."""
+        if not file_paths:
+            return 0
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            class SHFILEOPSTRUCTW(ctypes.Structure):
+                _fields_ = [
+                    ("hwnd", wintypes.HWND),
+                    ("wFunc", ctypes.c_uint),
+                    ("pFrom", wintypes.LPCWSTR),
+                    ("pTo", wintypes.LPCWSTR),
+                    ("fFlags", ctypes.c_uint16),
+                    ("fAnyOperationsAborted", wintypes.BOOL),
+                    ("hNameMappings", ctypes.c_void_p),
+                    ("lpszProgressTitle", wintypes.LPCWSTR),
+                ]
+
+            FO_DELETE = 3
+            FOF_SILENT = 0x0004
+            FOF_NOCONFIRMATION = 0x0010
+            FOF_ALLOWUNDO = 0x0040
+            FOF_NOERRORUI = 0x0400
+
+            # Batch in chunks of 100 to avoid command string limits
+            deleted_count = 0
+            for i in range(0, len(file_paths), 100):
+                chunk = [os.path.abspath(p) for p in file_paths[i : i + 100] if os.path.exists(p)]
+                if not chunk:
+                    continue
+                p_from = "\0".join(chunk) + "\0\0"
+                op = SHFILEOPSTRUCTW(
+                    hwnd=None,
+                    wFunc=FO_DELETE,
+                    pFrom=p_from,
+                    pTo=None,
+                    fFlags=FOF_SILENT | FOF_NOCONFIRMATION | FOF_ALLOWUNDO | FOF_NOERRORUI,
+                    fAnyOperationsAborted=False,
+                    hNameMappings=None,
+                    lpszProgressTitle=None,
+                )
+                rc = ctypes.windll.shell32.SHFileOperationW(ctypes.byref(op))
+                if rc == 0 and not op.fAnyOperationsAborted:
+                    deleted_count += len(chunk)
+                else:
+                    for p in chunk:
+                        if not os.path.exists(p):
+                            deleted_count += 1
+            return deleted_count
+        except Exception as e:
+            app_logger.warning(f"SHFileOperationW Recycle fallback to os.remove: {e}")
+            count = 0
+            for p in file_paths:
+                try:
+                    os.remove(p)
+                    count += 1
+                except Exception:
+                    pass
+            return count
+
+    def delete_files(self, spec: Optional[str] = None) -> bool:
+        """
+        Safely deletes (moves to Recycle Bin) filtered files in the background without opening Explorer.
+        Supports month filters (e.g. 'November', 'October'), extensions ('.png', '.pdf'), and folder targets.
+        """
+        self.last_result = None
+        raw = (spec or "").strip()
+        low = raw.lower()
+
+        # Determine folder target cleanly
+        if "screenshot" in low:
+            folder_target = "screenshots"
+        elif "download" in low:
+            folder_target = "downloads"
+        elif "desktop" in low:
+            folder_target = "desktop"
+        elif "document" in low:
+            folder_target = "documents"
+        elif "picture" in low:
+            folder_target = "pictures"
+        else:
+            m_path = re.search(r"([a-zA-Z]:\\[^\"\'\r\n<>|?*]+)", raw)
+            folder_target = m_path.group(1).strip() if m_path else "downloads"
+
+        folder_path = self._resolve_target_folder(folder_target)
+        if not os.path.exists(folder_path):
+            self.last_result = f"I couldn't find the {folder_target} folder, Boss."
+            return False
+
+        # Protect critical OS/root locations from blanket deletes
+        norm_low = os.path.normpath(folder_path).lower()
+        if norm_low in ("c:\\", "d:\\") or "\\windows" in norm_low or "\\system32" in norm_low:
+            self.last_result = "Blocked file deletion in protected root or system directories."
+            return False
+
+        month_map = {
+            "january": 1, "jan": 1, "february": 2, "feb": 2, "march": 3, "mar": 3,
+            "april": 4, "apr": 4, "may": 5, "june": 6, "jun": 6,
+            "july": 7, "jul": 7, "august": 8, "aug": 8, "september": 9, "sep": 9, "sept": 9,
+            "october": 10, "oct": 10, "november": 11, "nov": 11, "december": 12, "dec": 12,
+        }
+        target_month = None
+        target_month_name = None
+        now = datetime.datetime.now()
+        if "this month" in low:
+            target_month = now.month
+            target_month_name = now.strftime("%B")
+        elif "last month" in low or "previous month" in low:
+            target_month = 12 if now.month == 1 else now.month - 1
+            target_month_name = datetime.date(2026, target_month, 1).strftime("%B")
+        else:
+            for m_kw, m_num in month_map.items():
+                if re.search(r"\b" + m_kw + r"\b", low):
+                    target_month = m_num
+                    target_month_name = datetime.date(2026, m_num, 1).strftime("%B")
+                    break
+
+        year_match = re.search(r"\b(20\d{2})\b", low)
+        target_year = int(year_match.group(1)) if year_match else None
+
+        ext_matches = re.findall(r"\.(png|jpg|jpeg|webp|pdf|docx|txt|zip|mp4|tmp|log)\b", low)
+        target_exts = {f".{e}" for e in ext_matches}
+        if not target_exts and "screenshot" in low:
+            target_exts = {".png", ".jpg", ".jpeg", ".webp"}
+
+        system_files = {"desktop.ini", "thumbs.db", ".ds_store"}
+        matched_paths: List[str] = []
+        candidate_dirs: List[str] = []
+
+        for cur_root, _, files in os.walk(folder_path):
+            if cur_root != folder_path:
+                candidate_dirs.append(cur_root)
+            rel_dir_low = os.path.relpath(cur_root, folder_path).lower()
+            for fname in files:
+                if fname.lower() in system_files or fname.startswith("."):
+                    continue
+                full = os.path.join(cur_root, fname)
+                _, ext = os.path.splitext(fname)
+                if target_exts and ext.lower() not in target_exts:
+                    continue
+
+                if target_month is not None:
+                    matched_date = False
+                    has_explicit_month = False
+                    # 1. Check filename date e.g. Screenshot 2026-11-26
+                    dm = re.search(r"(20\d{2})[-_](\d{2})", fname)
+                    if dm:
+                        has_explicit_month = True
+                        f_y, f_m = int(dm.group(1)), int(dm.group(2))
+                        if f_m == target_month and (target_year is None or f_y == target_year):
+                            matched_date = True
+                    # 2. Check organized month folder name e.g. "November 2026"
+                    folder_months = [mk for mk in month_map if len(mk) > 3 and re.search(r"\b" + mk + r"\b", rel_dir_low)]
+                    if folder_months:
+                        has_explicit_month = True
+                        if not matched_date and target_month_name and target_month_name.lower() in rel_dir_low:
+                            if target_year is None or str(target_year) in rel_dir_low:
+                                matched_date = True
+                    # 3. Fallback to modified timestamp ONLY if neither filename nor subfolder specifies a month
+                    if not has_explicit_month and not matched_date:
+                        try:
+                            mt = datetime.datetime.fromtimestamp(os.path.getmtime(full))
+                            if mt.month == target_month and (target_year is None or mt.year == target_year):
+                                matched_date = True
+                        except Exception:
+                            pass
+                    if not matched_date:
+                        continue
+
+                matched_paths.append(full)
+
+        folder_label = os.path.basename(folder_path.rstrip("\\/")) or folder_target
+        if not matched_paths:
+            month_txt = f"{target_month_name} " if target_month_name else ""
+            self.last_result = f"No {month_txt}files were found to delete in your {folder_label} folder, Boss."
+            app_logger.info(f"[FileExplorer] {self.last_result}")
+            return True
+
+        deleted = self._recycle_files_silently(matched_paths)
+        # Clean up emptied month subfolders cleanly
+        for d in sorted(candidate_dirs, reverse=True):
+            try:
+                if os.path.exists(d) and not os.listdir(d):
+                    os.rmdir(d)
+            except Exception:
+                pass
+
+        month_txt = f"{target_month_name} " if target_month_name else ""
+        self.last_result = (
+            f"Done, Boss. Moved {deleted} {month_txt}files from your {folder_label} folder to the Recycle Bin."
+        )
+        app_logger.info(f"[FileExplorer] {self.last_result}")
+        return True
+
     def execute(self, intent: str, entity: Optional[str]) -> bool:
         _ensure_desktop()
         intent = intent.lower().strip()
         
         if intent in ["organize", "organize_folder", "sort_folder", "clean_folder"]:
             return self.organize_folder(entity)
+
+        elif intent in ["delete_files", "delete_file", "delete_screenshots", "remove_files", "clear_files", "delete", "remove"]:
+            return self.delete_files(entity)
             
         elif intent in ["open_app", "launch"]:
             self.launch()

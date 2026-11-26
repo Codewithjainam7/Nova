@@ -253,6 +253,16 @@ class CapabilityRouter:
             if not entity:
                 entity = task.description
 
+        # File delete/organize redirection guard: Never open Explorer GUI on screen for file deletion or cleanup
+        if any(k in task.description.lower() for k in ("delete", "remove", "clear")) and any(
+            f in task.description.lower() for f in ("screenshot", "screenshots", "file", "files", "downloads", "folder")
+        ):
+            app_name = "explorer"
+            intent = "delete_files"
+            desktop_action_str = "APP_INTENT_EXECUTE"
+            if not entity or entity.lower() in ("screenshots", "downloads"):
+                entity = task.description
+
         # Mobile app redirection guard: Never try to launch mobile phone apps on Windows PC
         phone_apps = {"instagram", "whatsapp", "telegram", "phone", "messages"}
         if app_name.lower().strip() in phone_apps and self.device_manager:
@@ -289,6 +299,7 @@ class CapabilityRouter:
                 "calculate", "compute", "math", "write_note", "write", "type_text",
                 "save_file", "play_media", "navigate", "open_folder", "explore",
                 "organize", "organize_folder", "sort_folder", "clean_folder",
+                "delete_files", "delete_file", "delete_screenshots", "remove_files", "clear_files", "delete", "remove",
                 "install_software", "find_wallpaper", "set_wallpaper", "create_collage", "make_collage",
                 "create_workspace", "create_folder", "open_vscode", "system_diagnostics", "run_command"
             ]:
