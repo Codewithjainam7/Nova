@@ -637,14 +637,20 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             or any(k in clean_lower for k in ["combine photos", "stitch photos", "merge photos", "combine wallpapers"])
         )
         if has_collage_kw:
+            is_borderless = any(k in clean_lower for k in [
+                "no border", "no borders", "without border", "without borders",
+                "borderless", "seamless", "edge to edge", "no gap", "no gaps"
+            ])
             subj = clean_lower
             subj = re.sub(
-                r'\b(?:can\s+u|can\s+you|make\s+(?:a|the)?|create\s+(?:a|the)?|build|very\s+cool|cool|awesome|collage|college|of\s+the|of|the|photos?|pics?|pictures?|images?|for\s+(?:my\s+)?wallpapers?|wallpapers?|you\s+downloaded|u\s+downloaded|downloaded|together|on|a|very|please)\b',
+                r'\b(?:can\s+u|can\s+you|make\s+(?:a|the)?|create\s+(?:a|the)?|build|very\s+cool|cool|awesome|collage|college|with\s+no\s+borders?|without\s+borders?|no\s+borders?|borderless|seamless|like\s+proper|proper|prope|like|of\s+the|of|the|photos?|pics?|pictures?|images?|for\s+(?:my\s+)?wallpapers?|wallpapers?|you\s+downloaded|u\s+downloaded|downloaded|together|with|on|a|very|please)\b',
                 ' ', subj
             )
             # Keep "and" cleanly as subject separator ("tony stark and dr doom" -> "tony stark | dr doom")
             parts = [p.strip() for p in re.split(r'\s+\band\b\s+', ' '.join(subj.split())) if p.strip()]
             entity_val = " | ".join(parts) if parts else "tony stark | dr doom"
+            if is_borderless:
+                entity_val += " [borderless]"
             task = Task(
                 task_id=str(uuid.uuid4()),
                 description=f"Create 4K wallpaper collage combining {' & '.join(parts) if parts else 'downloaded wallpapers'}",

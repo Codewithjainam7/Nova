@@ -215,10 +215,12 @@ class MediaWallpaperController(AppController):
         """
         from PIL import Image, ImageOps, ImageFilter, ImageDraw, ImageEnhance
 
+        raw_str = subjects_raw or ""
+        is_borderless = bool(re.search(r"\b(?:borderless|no\s+borders?|without\s+borders?|seamless)\b|\[borderless\]", raw_str, re.IGNORECASE))
         clean_subj = re.sub(
-            r"\b(?:create|make|build|generate|collage|college|of|the|photos?|pictures?|pics?|images?|wallpapers?|using\s+paint|using\s+mspaint|in\s+paint|with\s+paint|for\s+my|together)\b",
+            r"\[borderless\]|\b(?:create|make|build|generate|collage|college|with\s+no\s+borders?|without\s+borders?|no\s+borders?|borderless|seamless|like\s+proper|proper|prope|like|of|the|photos?|pictures?|pics?|images?|wallpapers?|using\s+paint|using\s+mspaint|in\s+paint|with\s+paint|for\s+my|together|with)\b",
             " ",
-            subjects_raw or "",
+            raw_str,
             flags=re.IGNORECASE,
         )
         subjects = [s.strip() for s in re.split(r"\s*\|\s*|\s+and\s+|,", clean_subj) if s.strip()]
@@ -272,67 +274,89 @@ class MediaWallpaperController(AppController):
         def _pick(pool: List[str], idx: int) -> str:
             return pool[idx % len(pool)] if pool else pool_left[0]
 
-        # Symmetric dual-side 4K bento layout (all landscape/balanced aspect ratios to avoid slicing characters):
-        # Left half (Tony / Subject 1): 1 wide top hero (1840x1180) + 2 lower cards (904x836)
-        # Right half (Doom / Subject 2): 1 wide top hero (1840x1180) + 2 lower cards (904x836)
-        slot_specs = [
-            (56, 56, 1840, 1180, _pick(pool_left, 0), (222, 74, 58)),
-            (56, 1268, 904, 836, _pick(pool_left, 1), (225, 173, 66)),
-            (992, 1268, 904, 836, _pick(pool_left, 2), (222, 74, 58)),
-            (1944, 56, 1840, 1180, _pick(pool_right, 0), (52, 199, 118)),
-            (1944, 1268, 904, 836, _pick(pool_right, 1), (138, 212, 168)),
-            (2880, 1268, 904, 836, _pick(pool_right, 2), (52, 199, 118)),
-        ]
+        # Symmetric dual-side 4K layout: edge-to-edge zero borders when borderless=True, or framed bento cards
+        if is_borderless:
+            slot_specs = [
+                (0, 0, 1920, 1200, _pick(pool_left, 0), None),
+                (0, 1200, 960, 960, _pick(pool_left, 1), None),
+                (960, 1200, 960, 960, _pick(pool_left, 2), None),
+                (1920, 0, 1920, 1200, _pick(pool_right, 0), None),
+                (1920, 1200, 960, 960, _pick(pool_right, 1), None),
+                (2880, 1200, 960, 960, _pick(pool_right, 2), None),
+            ]
+        else:
+            slot_specs = [
+                (56, 56, 1840, 1180, _pick(pool_left, 0), (222, 74, 58)),
+                (56, 1268, 904, 836, _pick(pool_left, 1), (225, 173, 66)),
+                (992, 1268, 904, 836, _pick(pool_left, 2), (222, 74, 58)),
+                (1944, 56, 1840, 1180, _pick(pool_right, 0), (52, 199, 118)),
+                (1944, 1268, 904, 836, _pick(pool_right, 1), (138, 212, 168)),
+                (2880, 1268, 904, 836, _pick(pool_right, 2), (52, 199, 118)),
+            ]
         center_candidate = _pick(pool_right, 0)
 
         W, H = 3840, 2160
-        try:
-            with Image.open(center_candidate) as bg_src:
-                bg = ImageOps.fit(bg_src.convert("RGB"), (W, H), method=Image.Resampling.LANCZOS)
-        except Exception:
-            bg = Image.new("RGB", (W, H), (14, 16, 22))
-        bg = bg.filter(ImageFilter.GaussianBlur(radius=46))
-        bg = ImageEnhance.Brightness(bg).enhance(0.24)
-        canvas = bg.convert("RGBA")
-
-        # Subtle left warm crimson & right emerald radial mood wash
-        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-        gdraw = ImageDraw.Draw(glow)
-        gdraw.ellipse((-400, -200, 1800, 2200), fill=(180, 35, 35, 55))
-        gdraw.ellipse((2000, -200, 4200, 2200), fill=(25, 145, 85, 55))
-        glow = glow.filter(ImageFilter.GaussianBlur(radius=160))
-        canvas = Image.alpha_composite(canvas, glow)
-
-        radius = 30
-        for x, y, pw, ph, img_path, accent_rgb in slot_specs:
-            # Soft shadow layer
-            shadow_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
-            sdraw = ImageDraw.Draw(shadow_layer)
-            sdraw.rounded_rectangle([x - 4, y + 10, x + pw + 4, y + ph + 14], radius=radius + 4, fill=(0, 0, 0, 175))
-            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=18))
-            canvas = Image.alpha_composite(canvas, shadow_layer)
-
+        if is_borderless:
+            canvas = Image.new("RGBA", (W, H), (0, 0, 0, 255))
+            for x, y, pw, ph, img_path, _ in slot_specs:
+                try:
+                    with Image.open(img_path) as im:
+                        tile = ImageOps.fit(im.convert("RGB"), (pw, ph), method=Image.Resampling.LANCZOS).convert("RGBA")
+                        tile = ImageEnhance.Contrast(tile).enhance(1.06)
+                        tile = ImageEnhance.Color(tile).enhance(1.08)
+                        canvas.paste(tile, (x, y))
+                except Exception:
+                    continue
+        else:
             try:
-                with Image.open(img_path) as im:
-                    tile = ImageOps.fit(im.convert("RGB"), (pw, ph), method=Image.Resampling.LANCZOS).convert("RGBA")
-                    tile = ImageEnhance.Contrast(tile).enhance(1.06)
-                    tile = ImageEnhance.Color(tile).enhance(1.08)
+                with Image.open(center_candidate) as bg_src:
+                    bg = ImageOps.fit(bg_src.convert("RGB"), (W, H), method=Image.Resampling.LANCZOS)
             except Exception:
-                continue
+                bg = Image.new("RGB", (W, H), (14, 16, 22))
+            bg = bg.filter(ImageFilter.GaussianBlur(radius=46))
+            bg = ImageEnhance.Brightness(bg).enhance(0.24)
+            canvas = bg.convert("RGBA")
 
-            mask = Image.new("L", (pw, ph), 0)
-            mdraw = ImageDraw.Draw(mask)
-            mdraw.rounded_rectangle([0, 0, pw - 1, ph - 1], radius=radius, fill=255)
+            # Subtle left warm crimson & right emerald radial mood wash
+            glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            gdraw = ImageDraw.Draw(glow)
+            gdraw.ellipse((-400, -200, 1800, 2200), fill=(180, 35, 35, 55))
+            gdraw.ellipse((2000, -200, 4200, 2200), fill=(25, 145, 85, 55))
+            glow = glow.filter(ImageFilter.GaussianBlur(radius=160))
+            canvas = Image.alpha_composite(canvas, glow)
 
-            framed = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
-            framed.paste(tile, (0, 0), mask)
+            radius = 30
+            for x, y, pw, ph, img_path, accent_rgb in slot_specs:
+                # Soft shadow layer
+                shadow_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+                sdraw = ImageDraw.Draw(shadow_layer)
+                sdraw.rounded_rectangle([x - 4, y + 10, x + pw + 4, y + ph + 14], radius=radius + 4, fill=(0, 0, 0, 175))
+                shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=18))
+                canvas = Image.alpha_composite(canvas, shadow_layer)
 
-            # Metallic accent border
-            bdraw = ImageDraw.Draw(framed)
-            bdraw.rounded_rectangle([1, 1, pw - 2, ph - 2], radius=radius, outline=(*accent_rgb, 210), width=4)
-            canvas.alpha_composite(framed, (x, y))
+                try:
+                    with Image.open(img_path) as im:
+                        tile = ImageOps.fit(im.convert("RGB"), (pw, ph), method=Image.Resampling.LANCZOS).convert("RGBA")
+                        tile = ImageEnhance.Contrast(tile).enhance(1.06)
+                        tile = ImageEnhance.Color(tile).enhance(1.08)
+                except Exception:
+                    continue
+
+                mask = Image.new("L", (pw, ph), 0)
+                mdraw = ImageDraw.Draw(mask)
+                mdraw.rounded_rectangle([0, 0, pw - 1, ph - 1], radius=radius, fill=255)
+
+                framed = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+                framed.paste(tile, (0, 0), mask)
+
+                # Metallic accent border
+                bdraw = ImageDraw.Draw(framed)
+                bdraw.rounded_rectangle([1, 1, pw - 2, ph - 2], radius=radius, outline=(*accent_rgb, 210), width=4)
+                canvas.alpha_composite(framed, (x, y))
 
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", "_".join(subjects).lower()).strip("_")[:45] or "ada"
+        if is_borderless:
+            slug = f"{slug}_borderless"
         if os.path.exists("D:\\"):
             out_dir = r"D:\ADA_Wallpapers\collages"
         else:

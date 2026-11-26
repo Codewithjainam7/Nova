@@ -135,22 +135,22 @@ export const ResponseOverlay: React.FC<ResponseOverlayProps> = ({
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: -10, scale: 0.98 }}
             transition={{ duration: 0.3 }}
-            className="relative px-5 sm:px-7 py-3 sm:py-4 rounded-2xl border border-cyan-400/40 bg-[#030612]/94 backdrop-blur-2xl w-full max-w-md sm:max-w-lg md:max-w-xl text-center shadow-[0_0_45px_rgba(6,182,212,0.25)] pointer-events-auto cyber-bracket"
+            className="relative mx-4 px-6 sm:px-9 py-4 sm:py-5 rounded-2xl border border-cyan-400/40 bg-[#030612]/94 backdrop-blur-2xl w-[calc(100%-2rem)] max-w-md sm:max-w-lg md:max-w-xl max-h-[42vh] overflow-y-auto overflow-x-hidden text-center shadow-[0_0_45px_rgba(6,182,212,0.25)] pointer-events-auto cyber-bracket"
           >
             {/* Dismiss Button */}
             <button
               onClick={() => setDismissed(true)}
-              className="absolute top-2.5 right-2.5 sm:top-3 sm:right-3 text-white/50 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
+              className="absolute top-3 right-3 text-white/50 hover:text-white p-1 rounded-lg hover:bg-white/10 transition-colors cursor-pointer"
               title="Dismiss"
             >
               <X className="w-3.5 h-3.5 sm:w-4 sm:h-4" />
             </button>
 
-            <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-1.5 sm:mb-2">
-              <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 animate-pulse" />
+            <div className="flex items-center justify-center gap-1.5 sm:gap-2 mb-2 px-6">
+              <Volume2 className="w-3.5 h-3.5 sm:w-4 sm:h-4 text-cyan-400 animate-pulse shrink-0" />
               <p className="text-[10px] text-cyan-300 uppercase tracking-widest font-hud font-bold">ADA DIRECTIVE RESPONSE</p>
             </div>
-            <p className="text-white/95 text-xs sm:text-sm leading-relaxed font-sans font-normal tracking-wide">{response}</p>
+            <p className="px-2 text-white/95 text-xs sm:text-sm leading-relaxed font-sans font-normal tracking-wide whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{response}</p>
           </motion.div>
         )}
       </AnimatePresence>
