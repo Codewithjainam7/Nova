@@ -548,6 +548,8 @@ class WindowsIntentManager:
             success = await asyncio.to_thread(_execute_intent)
             if success and self.router.last_output:
                 action.payload["output"] = self.router.last_output
+            if success and self.router.last_file_path:
+                action.payload["file_path"] = self.router.last_file_path
             if not success:
                 app_logger.error(f"Intent {intent} for {app_name} failed to execute.")
             return success

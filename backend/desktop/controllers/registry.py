@@ -50,6 +50,7 @@ class AppActionRouter:
             "workspace": self.terminal,
         }
         self.last_output: Optional[str] = None
+        self.last_file_path: Optional[str] = None
         
     def _get_generic_exe(self, app_name: str) -> str:
         app_map = {
@@ -72,6 +73,7 @@ class AppActionRouter:
     def execute(self, app_name: str, intent: str, entity: str) -> bool:
         app_name_lower = app_name.lower().strip()
         self.last_output = None
+        self.last_file_path = None
         
         # 1. Look for specific dedicated controller
         controller = self.registry.get(app_name_lower)
@@ -102,7 +104,9 @@ class AppActionRouter:
         # 4. Execute the intent
         success = controller.execute(intent, entity)
         
-        # 5. Extract output if available
+        # 5. Extract output and generated file path if available
+        if hasattr(controller, 'last_file_path') and controller.last_file_path:
+            self.last_file_path = controller.last_file_path
         if hasattr(controller, 'last_output') and controller.last_output:
             self.last_output = controller.last_output
         elif hasattr(controller, 'last_result') and controller.last_result:

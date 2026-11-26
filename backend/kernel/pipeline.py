@@ -15,6 +15,7 @@ class KernelPipeline:
     """
     def __init__(self, event_bus: KernelEventBus):
         self.event_bus = event_bus
+        self._pending_open_files = {}
 
     async def _stream_progress(self, session: KernelSession, message: str):
         """Phase 8: Progress Streaming"""
@@ -87,6 +88,58 @@ class KernelPipeline:
                 user_intent = await voice.manager.stt.transcribe(audio_bytes)
                 app_logger.info(f"Voice transcript: {user_intent}")
 
+            # 1.5. Follow-up Open / Apply Handler for recently created or downloaded files
+            conv_key = getattr(request, "conversation_id", None) or "default"
+            q_follow = user_intent.lower().strip().rstrip(".!?")
+            pending_file = self._pending_open_files.get(conv_key) or self._pending_open_files.get("_latest")
+            if pending_file:
+                yes_open = q_follow in {
+                    "yes", "yeah", "yep", "yup", "sure", "ok", "okay", "please",
+                    "open", "open it", "open that", "open file", "open the file",
+                    "yes open it", "yes please", "yes open", "show me", "show it",
+                    "go ahead", "do it", "han", "ha", "karde", "open the collage", "yes open the file"
+                }
+                apply_wp = q_follow in {
+                    "set it as wallpaper", "set as wallpaper", "apply it", "apply wallpaper",
+                    "make it my wallpaper", "put it as wallpaper", "put as wallpaper"
+                }
+                no_skip = q_follow in {"no", "nope", "nah", "no thanks", "not now", "leave it", "dont", "don't"}
+
+                if yes_open or apply_wp or no_skip:
+                    self._pending_open_files.pop(conv_key, None)
+                    self._pending_open_files.pop("_latest", None)
+                    if yes_open:
+                        if os.path.exists(pending_file):
+                            await asyncio.to_thread(os.startfile, pending_file)
+                            reply_txt = "Opening it for you now, Boss."
+                        else:
+                            reply_txt = "That file seems to have moved or been deleted, Boss."
+                    elif apply_wp:
+                        if os.path.exists(pending_file) and pending_file.lower().endswith((".jpg", ".jpeg", ".png")):
+                            import ctypes
+                            abs_p = os.path.abspath(pending_file)
+                            await asyncio.to_thread(ctypes.windll.user32.SystemParametersInfoW, 20, 0, abs_p, 3)
+                            reply_txt = "Done, Boss. Applied it as your desktop wallpaper."
+                        else:
+                            reply_txt = "I couldn't apply that file as a wallpaper, Boss."
+                    else:
+                        reply_txt = "Got it, Boss. Keeping it saved cleanly for later."
+
+                    if is_voice and voice:
+                        try:
+                            audio_out = await voice.manager.tts.synthesize(reply_txt)
+                            await voice.manager.player.play(audio_out)
+                        except Exception:
+                            pass
+                    session.update_state(KernelState.COMPLETED)
+                    await self.event_bus.publish(KernelEventType.RESPONSE_COMPLETED, session)
+                    return KernelResponse(
+                        request_id=request.request_id,
+                        session_id=session.session_id,
+                        status=KernelState.COMPLETED,
+                        content=reply_txt
+                    )
+
             # Phase 4: Memory Integration (Two-Tier Cognitive Injection)
             session.update_state(KernelState.PLANNING)
             await self.event_bus.publish(KernelEventType.PLANNING_STARTED, session)
@@ -140,11 +193,13 @@ class KernelPipeline:
             if mission_runner.is_away_or_night_mission(user_intent):
                 await self._stream_progress(session, "Initializing autonomous night-shift mission...")
                 mission_res = await mission_runner.execute_mission(user_intent)
-                report_name = os.path.basename(mission_res.get("report_file", "report.md"))
+                report_path = mission_res.get("report_file", "")
+                if report_path:
+                    self._pending_open_files[conv_key] = report_path
+                    self._pending_open_files["_latest"] = report_path
+                report_name = os.path.basename(report_path or "report.md")
                 final_response_text = (
-                    f"Understood, Boss. I have initiated your autonomous mission: '{user_intent}'.\n\n"
-                    f"I have conducted the strategic analysis, formulated actionable recommendations, and saved your comprehensive deliverable to `{report_name}` in `workspace/reports/`.\n\n"
-                    f"Get some rest—I will continue monitoring in the background and have your complete morning briefing ready the moment you power on your laptop."
+                    f"Done, Boss. I completed your autonomous mission and saved the report as {report_name}. Should I open it for you?"
                 )
                 session.update_state(KernelState.COMPLETED)
                 await self._stream_progress(session, "Mission prepared.")
@@ -488,6 +543,10 @@ class KernelPipeline:
                             execution_result = await capability_router.route_task(task)
                         
                         if execution_result:
+                            created_path = task.action_metadata.get("created_file_path")
+                            if created_path:
+                                self._pending_open_files[conv_key] = created_path
+                                self._pending_open_files["_latest"] = created_path
                             exec_out = task.action_metadata.get("execution_output", "")
                             if exec_out:
                                 execution_context += f"\n[CapabilityRouter] Successfully executed task: {task.description}. Output: {exec_out}"

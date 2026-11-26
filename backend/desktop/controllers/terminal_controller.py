@@ -34,6 +34,7 @@ class TerminalWorkspaceController(AppController):
 
     def __init__(self):
         self.last_output: Optional[str] = None
+        self.last_file_path: Optional[str] = None
 
     def is_open(self) -> bool:
         return True
@@ -93,6 +94,7 @@ class TerminalWorkspaceController(AppController):
     def execute(self, intent: str, entity: Optional[str]) -> bool:
         app_logger.info(f"TerminalWorkspaceController executing intent='{intent}' entity='{entity}'")
         self.last_output = None
+        self.last_file_path = None
         intent_low = (intent or "").lower().strip()
         raw = (entity or "").strip()
 
@@ -109,9 +111,11 @@ class TerminalWorkspaceController(AppController):
             if open_vscode and opened:
                 self.last_output = f"Created your {folder_label} folder and opened it in VS Code, Boss."
             elif open_vscode and not opened:
-                self.last_output = f"Created your {folder_label} folder, though VS Code was not found on PATH."
+                self.last_file_path = target_path
+                self.last_output = f"Created your {folder_label} folder, though VS Code was not found on PATH. Should I open the folder for you?"
             else:
-                self.last_output = f"Created your {folder_label} workspace folder, Boss."
+                self.last_file_path = target_path
+                self.last_output = f"Created your {folder_label} workspace folder, Boss. Should I open it for you?"
             return True
 
         if intent_low == "open_vscode":

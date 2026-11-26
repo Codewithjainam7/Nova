@@ -57,6 +57,7 @@ class MediaWallpaperController(AppController):
 
     def __init__(self):
         self.last_output: Optional[str] = None
+        self.last_file_path: Optional[str] = None
         self.user_agent = (
             "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
             "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -376,6 +377,7 @@ class MediaWallpaperController(AppController):
     def execute(self, intent: str, entity: Optional[str]) -> bool:
         app_logger.info(f"MediaWallpaperController executing intent='{intent}' entity='{entity}'")
         self.last_output = None
+        self.last_file_path = None
 
         intent_low = (intent or "").lower().strip()
         if intent_low in ("create_collage", "make_collage"):
@@ -384,6 +386,7 @@ class MediaWallpaperController(AppController):
                 self.last_output = "I couldn't find enough photos to build the 4K collage right now, Boss."
                 return False
             out_path = result["path"]
+            self.last_file_path = out_path
             app_logger.info(f"Saved 4K collage at {out_path} ({result['size_kb']} KB) from {result['used_files']}")
             # Save a ready helper script beside the collage without cluttering voice/HUD response
             try:
@@ -399,7 +402,7 @@ class MediaWallpaperController(AppController):
                 pass
             subjects_disp = " and ".join([s.title() for s in result["subjects"]])
             loc_phrase = "your D drive ADA Wallpapers collages folder" if out_path.startswith("D:\\") else "your Downloads collages folder"
-            self.last_output = f"Done, Boss. I created your 4K {subjects_disp} collage wallpaper and saved it in {loc_phrase}."
+            self.last_output = f"Done, Boss. I created your 4K {subjects_disp} collage wallpaper and saved it in {loc_phrase}. Should I open the file for you?"
             return True
 
         raw_topic = (entity or "4k wallpaper").strip()
@@ -432,6 +435,7 @@ class MediaWallpaperController(AppController):
         # Prefer .jpg / .png for native Windows wallpaper compatibility
         saved.sort(key=lambda s: (0 if s["path"].lower().endswith((".jpg", ".jpeg", ".png")) else 1))
         primary = saved[0]["path"]
+        self.last_file_path = primary
         app_logger.info(f"Saved {len(saved)} photos to {dest_dir}; primary={primary}")
 
         try:
@@ -450,7 +454,7 @@ class MediaWallpaperController(AppController):
         loc_phrase = "your D drive ADA Wallpapers folder" if dest_dir.startswith("D:\\") else "your Downloads folder"
 
         if intent_low == "set_wallpaper" and self._apply_wallpaper(primary):
-            self.last_output = f"Done, Boss. I downloaded and applied your new 4K {topic_clean} wallpaper."
+            self.last_output = f"Done, Boss. I downloaded and applied your new 4K {topic_clean} wallpaper. Should I open the file for you?"
         else:
-            self.last_output = f"Done, Boss. I downloaded {len(saved)} high-resolution 4K {topic_clean} photos and saved them in {loc_phrase}."
+            self.last_output = f"Done, Boss. I downloaded {len(saved)} high-resolution 4K {topic_clean} photos and saved them in {loc_phrase}. Should I open it for you?"
         return True

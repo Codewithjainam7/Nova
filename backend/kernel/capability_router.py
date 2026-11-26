@@ -298,7 +298,9 @@ class CapabilityRouter:
                 )
                 await self.desktop_engine.perform_action(action)
                 
-                # Check if router returned output (e.g. calculation answer, file saved, note text, organization summary)
+                # Check if router returned output or generated file path
+                if action.payload.get("file_path"):
+                    task.action_metadata["created_file_path"] = str(action.payload["file_path"])
                 output = action.payload.get("output")
                 if output:
                     task.action_metadata["execution_output"] = str(output)
