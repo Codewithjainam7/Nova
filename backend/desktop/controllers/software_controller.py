@@ -168,8 +168,8 @@ class SoftwareInstallerController(AppController):
                 app_logger.warning(f"Could not open official download URL: {e}")
 
         if has_winget:
-            self.last_output = f"Initiated download and installation of the latest {name} via Windows Package Manager (winget) and opened the official download page ({url}) in the background for you, Boss."
+            self.last_output = f"Started downloading and installing the latest {name} cleanly in the background, Boss."
         else:
-            self.last_output = f"Opened the official download portal for {name} ({url}) in the background for you, Boss."
+            self.last_output = f"Opened the official download page for {name} in the background, Boss."
 
         return True

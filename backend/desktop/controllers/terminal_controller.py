@@ -105,12 +105,13 @@ class TerminalWorkspaceController(AppController):
             os.makedirs(target_path, exist_ok=True)
             open_vscode = any(k in raw.lower() for k in ["vs code", "vscode", "visual studio code", "in code"])
             opened = self._open_in_vscode(target_path) if open_vscode else False
+            folder_label = os.path.basename(target_path) or target_path
             if open_vscode and opened:
-                self.last_output = f"Created folder `{target_path}` and opened it in VS Code."
+                self.last_output = f"Created your {folder_label} folder and opened it in VS Code, Boss."
             elif open_vscode and not opened:
-                self.last_output = f"Created folder `{target_path}`, though VS Code (`code`) was not found on PATH."
+                self.last_output = f"Created your {folder_label} folder, though VS Code was not found on PATH."
             else:
-                self.last_output = f"Created workspace folder `{target_path}`."
+                self.last_output = f"Created your {folder_label} workspace folder, Boss."
             return True
 
         if intent_low == "open_vscode":

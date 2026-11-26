@@ -357,26 +357,25 @@ class MediaWallpaperController(AppController):
         if intent_low in ("create_collage", "make_collage"):
             result = self._create_collage(entity or "tony stark | dr doom")
             if not result:
-                self.last_output = "Could not find or download enough valid photos to build the 4K collage."
+                self.last_output = "I couldn't find enough photos to build the 4K collage right now, Boss."
                 return False
             out_path = result["path"]
-            ps_cmd = (
-                "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { "
-                '[DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int '
-                "SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }'; "
-                f'[W]::SystemParametersInfo(20, 0, "{out_path}", 3)'
-            )
-            cmd_one_liner = (
-                f'reg add "HKCU\\Control Panel\\Desktop" /v Wallpaper /t REG_SZ /d "{out_path}" /f && '
-                f'RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters ,1 ,True'
-            )
-            sources_list = "\n".join([f"- `{p}`" for p in result["used_files"]])
-            self.last_output = (
-                f"Created your custom 4K (3840x2160) collage wallpaper at `{out_path}` ({result['size_kb']} KB).\n\n"
-                f"Source photos combined:\n{sources_list}\n\n"
-                f"PowerShell wallpaper command:\n```powershell\n{ps_cmd}\n```\n"
-                f"CMD wallpaper command:\n```cmd\n{cmd_one_liner}\n```"
-            )
+            app_logger.info(f"Saved 4K collage at {out_path} ({result['size_kb']} KB) from {result['used_files']}")
+            # Save a ready helper script beside the collage without cluttering voice/HUD response
+            try:
+                ps_file = os.path.join(os.path.dirname(out_path), "apply_collage_wallpaper.ps1")
+                with open(ps_file, "w", encoding="utf-8") as pf:
+                    pf.write(
+                        "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { "
+                        '[DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int '
+                        "SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }'; "
+                        f'[W]::SystemParametersInfo(20, 0, "{out_path}", 3)\n'
+                    )
+            except Exception:
+                pass
+            subjects_disp = " and ".join([s.title() for s in result["subjects"]])
+            loc_phrase = "your D drive ADA Wallpapers collages folder" if out_path.startswith("D:\\") else "your Downloads collages folder"
+            self.last_output = f"Done, Boss. I created your 4K {subjects_disp} collage wallpaper and saved it in {loc_phrase}."
             return True
 
         raw_topic = (entity or "4k wallpaper").strip()
@@ -403,39 +402,31 @@ class MediaWallpaperController(AppController):
                     break
 
         if not saved:
-            top_urls = "\n".join([f"- {c.get('image')}" for c in candidates[:3] if c.get("image")])
-            self.last_output = (
-                f"Found high-res image links for '{raw_topic}', though direct hotlink downloads were blocked:\n{top_urls}"
-            )
+            self.last_output = f"I found high-resolution links for {raw_topic}, though direct downloads were blocked by the host."
             return True
 
         # Prefer .jpg / .png for native Windows wallpaper compatibility
         saved.sort(key=lambda s: (0 if s["path"].lower().endswith((".jpg", ".jpeg", ".png")) else 1))
         primary = saved[0]["path"]
-        applied_msg = ""
-        if intent.lower().strip() == "set_wallpaper":
-            if self._apply_wallpaper(primary):
-                applied_msg = f"Applied `{os.path.basename(primary)}` as your desktop wallpaper, Boss.\n\n"
+        app_logger.info(f"Saved {len(saved)} photos to {dest_dir}; primary={primary}")
 
-        files_summary = "\n".join(
-            [f"- `{s['path']}` ({s['width']}x{s['height']}, {s['size_kb']} KB)" for s in saved]
-        )
-        ps_cmd = (
-            "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { "
-            '[DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int '
-            "SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }'; "
-            f'[W]::SystemParametersInfo(20, 0, "{primary}", 3)'
-        )
-        cmd_one_liner = (
-            f'reg add "HKCU\\Control Panel\\Desktop" /v Wallpaper /t REG_SZ /d "{primary}" /f && '
-            f'RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters ,1 ,True'
-        )
+        try:
+            ps_file = os.path.join(dest_dir, "apply_wallpaper.ps1")
+            with open(ps_file, "w", encoding="utf-8") as pf:
+                pf.write(
+                    "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { "
+                    '[DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int '
+                    "SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }'; "
+                    f'[W]::SystemParametersInfo(20, 0, "{primary}", 3)\n'
+                )
+        except Exception:
+            pass
 
-        self.last_output = (
-            f"{applied_msg}"
-            f"Downloaded {len(saved)} high-resolution 4K photos for '{raw_topic}' into `{dest_dir}`:\n"
-            f"{files_summary}\n\n"
-            f"PowerShell wallpaper command:\n```powershell\n{ps_cmd}\n```\n"
-            f"CMD wallpaper command:\n```cmd\n{cmd_one_liner}\n```"
-        )
+        topic_clean = re.sub(r"\b(?:4k|wallpaper)\b", "", raw_topic, flags=re.IGNORECASE).strip() or raw_topic
+        loc_phrase = "your D drive ADA Wallpapers folder" if dest_dir.startswith("D:\\") else "your Downloads folder"
+
+        if intent_low == "set_wallpaper" and self._apply_wallpaper(primary):
+            self.last_output = f"Done, Boss. I downloaded and applied your new 4K {topic_clean} wallpaper."
+        else:
+            self.last_output = f"Done, Boss. I downloaded {len(saved)} high-resolution 4K {topic_clean} photos and saved them in {loc_phrase}."
         return True

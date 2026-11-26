@@ -607,10 +607,16 @@ class KernelPipeline:
                 if memory and user_intent:
                     asyncio.create_task(self._extract_and_learn(user_intent, final_response_text, memory, provider_manager))
 
-            # Output TTS
+            # Output TTS (sanitize code blocks, URLs, and raw Windows paths before speaking)
             if is_voice and voice:
+                import re as _re
                 app_logger.info("Routing to VoiceEngine for TTS")
-                audio_out = await voice.manager.tts.synthesize(final_response_text)
+                tts_text = _re.sub(r"```[\s\S]*?```", "", final_response_text)
+                tts_text = _re.sub(r"https?://\S+", "", tts_text)
+                tts_text = _re.sub(r"[A-Za-z]:\\[^\s`\"']+", "the folder", tts_text)
+                tts_text = _re.sub(r"[`*_#]", "", tts_text)
+                tts_text = " ".join(tts_text.split()).strip() or "Done, Boss."
+                audio_out = await voice.manager.tts.synthesize(tts_text)
                 await voice.manager.player.play(audio_out)
 
             session.update_state(KernelState.COMPLETED)
