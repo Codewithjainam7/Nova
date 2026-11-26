@@ -245,6 +245,14 @@ class CapabilityRouter:
         url = meta.get("url", "")
         desktop_action_str = meta.get("desktop_action", "").upper().strip()
 
+        # Collage redirection guard: Never route image collage creation to MS Paint / Explorer
+        if "collage" in task.description.lower() or intent in ("create_collage", "make_collage"):
+            app_name = "media"
+            intent = "create_collage"
+            desktop_action_str = "APP_INTENT_EXECUTE"
+            if not entity:
+                entity = task.description
+
         # Mobile app redirection guard: Never try to launch mobile phone apps on Windows PC
         phone_apps = {"instagram", "whatsapp", "telegram", "phone", "messages"}
         if app_name.lower().strip() in phone_apps and self.device_manager:

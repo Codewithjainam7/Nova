@@ -215,7 +215,13 @@ class MediaWallpaperController(AppController):
         """
         from PIL import Image, ImageOps, ImageFilter, ImageDraw, ImageEnhance
 
-        subjects = [s.strip() for s in re.split(r"\s*\|\s*|\s+and\s+", subjects_raw or "") if s.strip()]
+        clean_subj = re.sub(
+            r"\b(?:create|make|build|generate|collage|college|of|the|photos?|pictures?|pics?|images?|wallpapers?|using\s+paint|using\s+mspaint|in\s+paint|with\s+paint|for\s+my|together)\b",
+            " ",
+            subjects_raw or "",
+            flags=re.IGNORECASE,
+        )
+        subjects = [s.strip() for s in re.split(r"\s*\|\s*|\s+and\s+|,", clean_subj) if s.strip()]
         if not subjects:
             subjects = ["tony stark", "dr doom"]
 
