@@ -221,10 +221,9 @@ class MediaWallpaperController(AppController):
 
         subject_pools: List[List[str]] = []
         for subj in subjects[:3]:
-            local_hits = _find_local_subject_images(subj, limit=4)
-            # If user specifically asked for Dr Doom and only Avengers Doomsday or <2 hits exist locally, fetch 2 more dedicated shots
-            if len(local_hits) < 2:
-                fetched = self._download_for_subject(subj, limit=3 - len(local_hits))
+            local_hits = _find_local_subject_images(subj, limit=6)
+            if len(local_hits) < 3:
+                fetched = self._download_for_subject(subj, limit=3)
                 for fpath in fetched:
                     if fpath not in local_hits:
                         local_hits.append(fpath)
@@ -232,62 +231,53 @@ class MediaWallpaperController(AppController):
                 subject_pools.append(local_hits)
 
         if not subject_pools:
-            # Broad fallback: grab any wallpapers in D:\ADA_Wallpapers or D:\Wallpaper
             fallback = _find_local_subject_images("wallpaper", limit=6)
             if fallback:
                 subject_pools.append(fallback)
             else:
                 return None
 
-        # Order 6 panels: 3 left (subj 0), 1 center hero (cross/doom/hero), 2 right top + 1 right bottom (subj 1 or alt)
-        ordered_paths: List[str] = []
-        left_imgs = subject_pools[0]
-        right_imgs = subject_pools[1] if len(subject_pools) > 1 else subject_pools[0]
+        # Deduplicate left and right pools cleanly so every panel displays a distinct image
+        used_paths: set = set()
+        pool_left: List[str] = []
+        for p in subject_pools[0]:
+            if p not in used_paths:
+                pool_left.append(p)
+                used_paths.add(p)
 
-        # Ensure 6 distinct paths by cycling cleanly without immediate neighbors matching
-        combined = []
-        for p in left_imgs + right_imgs:
-            if p not in combined:
-                combined.append(p)
-        if not combined:
-            return None
+        right_raw = subject_pools[1] if len(subject_pools) > 1 else subject_pools[0]
+        pool_right: List[str] = []
+        for p in right_raw:
+            if p not in used_paths:
+                pool_right.append(p)
+                used_paths.add(p)
 
-        # Build panel list cleanly (Left top hero, Left bot 1, Left bot 2, Center full clash, Right top 1, Right top 2, Right bot hero -> 7 panels? Wait 6 panels!)
-        # 6 Asymmetric Cinematic Panels:
-        # [0] Top-Left (Left subj hero)   | [1] Bot-Left-A  | [2] Bot-Left-B
-        # [3] Full-Height Center Clash    | [4] Top-Right-A | [5] Top-Right-B | [6 -> Wait let's use 5 or 6 exact slots!]
-        # Let's match 6 exact slots cleanly:
-        # 0: Left Top Hero (56, 56, 1220, 1240)
-        # 1: Left Bot Left (56, 1328, 594, 776)
-        # 2: Left Bot Right (682, 1328, 594, 776)
-        # 3: Center Tall Hero (1308, 56, 1224, 2048)
-        # 4: Right Top Split (2564, 56, 1220, 776)
-        # 5: Right Bot Hero (2564, 864, 1220, 1240)
-        pool_left = list(left_imgs)
-        pool_right = list(right_imgs)
-        center_candidate = None
-        for p in right_imgs + left_imgs:
-            if "doomsday" in os.path.basename(p).lower():
-                center_candidate = p
-                break
-        if not center_candidate:
-            center_candidate = right_imgs[0] if len(subject_pools) > 1 else left_imgs[0]
+        # Top up from fallback wallpapers if a pool still has < 3 distinct files
+        extra_pool = [p for p in (subject_pools[0] + right_raw + _find_local_subject_images("wallpaper", limit=12)) if p not in used_paths]
+        while len(pool_left) < 3 and extra_pool:
+            p = extra_pool.pop(0)
+            pool_left.append(p)
+            used_paths.add(p)
+        while len(pool_right) < 3 and extra_pool:
+            p = extra_pool.pop(0)
+            pool_right.append(p)
+            used_paths.add(p)
 
-        def _pick(pool: List[str], idx: int, avoid: Optional[str] = None) -> str:
-            for off in range(len(pool)):
-                cand = pool[(idx + off) % len(pool)]
-                if cand != avoid or len(pool) == 1:
-                    return cand
-            return pool[0]
+        def _pick(pool: List[str], idx: int) -> str:
+            return pool[idx % len(pool)] if pool else pool_left[0]
 
+        # Symmetric dual-side 4K bento layout (all landscape/balanced aspect ratios to avoid slicing characters):
+        # Left half (Tony / Subject 1): 1 wide top hero (1840x1180) + 2 lower cards (904x836)
+        # Right half (Doom / Subject 2): 1 wide top hero (1840x1180) + 2 lower cards (904x836)
         slot_specs = [
-            (56, 56, 1220, 1240, _pick(pool_left, 0), (218, 68, 55)),
-            (56, 1328, 594, 776, _pick(pool_left, 1), (225, 173, 66)),
-            (682, 1328, 594, 776, _pick(pool_left, 2), (218, 68, 55)),
-            (1308, 56, 1224, 2048, center_candidate, (220, 228, 240)),
-            (2564, 56, 1220, 776, _pick(pool_right, 0, avoid=center_candidate), (52, 199, 118)),
-            (2564, 864, 1220, 1240, _pick(pool_right, 1, avoid=center_candidate), (52, 199, 118)),
+            (56, 56, 1840, 1180, _pick(pool_left, 0), (222, 74, 58)),
+            (56, 1268, 904, 836, _pick(pool_left, 1), (225, 173, 66)),
+            (992, 1268, 904, 836, _pick(pool_left, 2), (222, 74, 58)),
+            (1944, 56, 1840, 1180, _pick(pool_right, 0), (52, 199, 118)),
+            (1944, 1268, 904, 836, _pick(pool_right, 1), (138, 212, 168)),
+            (2880, 1268, 904, 836, _pick(pool_right, 2), (52, 199, 118)),
         ]
+        center_candidate = _pick(pool_right, 0)
 
         W, H = 3840, 2160
         try:
