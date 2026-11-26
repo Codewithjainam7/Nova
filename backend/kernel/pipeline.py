@@ -355,8 +355,9 @@ class KernelPipeline:
                 "what can you do", "who made you", "your name", "who are we"
             ])
             is_image_or_wallpaper = any(k in q_lower for k in [
-                "wallpaper", "walppaer", "walpaper", "4k photo", "4 k photo", "4k image", "4k pic",
-                "high quality photo", "highquality photo", "photos of", "pictures of", "images of"
+                "wallpaper", "wallapaper", "walppaer", "walpaper", "4k photo", "4 k photo", "4k image", "4k pic",
+                "high quality photo", "highquality photo", "photos of", "pictures of", "images of",
+                "collage", "college of", "make the college"
             ])
             is_search_intent = (
                 (any(marker in q_lower for marker in search_markers) or is_question) and

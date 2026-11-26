@@ -79,6 +79,7 @@ IMPORTANT RULES:
 4. WORKSPACE NEWS/MAP OVERLAY vs MEDIA/WALLPAPERS:
    - ONLY use "background_search" when the user explicitly asks to display live world news or a geographic map widget on the HUD. NEVER use "background_search" for finding photos, images, 4K wallpapers, coding help, or desktop files!
    - If the user asks to find, download, or set 4K photos/images/wallpapers (e.g. 'find 4k photos of Tony Stark', 'set cyberpunk wallpaper'): use "desktop" in required_tools with app: "media", intent: "find_wallpaper" (or "set_wallpaper"), entity: "<subject> 4k wallpaper", and desktop_action: "APP_INTENT_EXECUTE".
+   - If the user asks to create a collage / combine wallpaper photos together (e.g. 'make a collage of Tony Stark and Dr Doom photos'): NEVER open Explorer/Downloads or Paint telling the user to do it manually! Use "desktop" in required_tools with app: "media", intent: "create_collage", entity: "<subject 1> | <subject 2>", and desktop_action: "APP_INTENT_EXECUTE".
 5. If the user asks to interact with their phone (e.g., check battery, connect phone, pair phone, open app on phone, play a song or video on phone, send a message, transfer a file, or open/view a file/image on the phone), use "device" in required_tools. For pairing, set intent to "pair". For connecting, set intent to "connect". For battery, set intent to "get_battery". For opening an app, set intent to "open_app". For playing a song/video/media on the phone, MUST set intent to "play_media", provide the media name in "entity", and provide the target app (e.g. "youtube", "spotify") in "app" within action_metadata.
    - For sending a message (e.g. WhatsApp, Telegram, Instagram):
      DEFAULT PLATFORM RULE: If the user does not explicitly specify a platform (e.g. 'msg manav what is he doing', 'send message to mom', 'text jagrat are you free'), ALWAYS DEFAULT THE MESSAGING PLATFORM TO "whatsapp".
@@ -625,6 +626,43 @@ Return exactly ONE JSON object matching this schema. Do not output markdown, jus
             intent = Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query)
             goal = Goal(primary_goal=f"Download and install {names_joined}")
             return Plan(plan_id=str(uuid.uuid4()), intent=intent, goal=goal, tasks=sw_tasks)
+
+        # 0.64. 4K Photo Collage Maker Fast-Path (autonomously stitches wallpapers cleanly via Pillow)
+        has_collage_kw = bool(
+            re.search(r'\bcollage\b', clean_lower)
+            or (
+                re.search(r'\bcollege\b', clean_lower)
+                and any(k in clean_lower for k in ["photo", "photos", "pic", "pics", "picture", "pictures", "wallpaper", "wallpapers", "image", "images", "downloaded", "make", "together"])
+            )
+            or any(k in clean_lower for k in ["combine photos", "stitch photos", "merge photos", "combine wallpapers"])
+        )
+        if has_collage_kw:
+            subj = clean_lower
+            subj = re.sub(
+                r'\b(?:can\s+u|can\s+you|make\s+(?:a|the)?|create\s+(?:a|the)?|build|very\s+cool|cool|awesome|collage|college|of\s+the|of|the|photos?|pics?|pictures?|images?|for\s+(?:my\s+)?wallpapers?|wallpapers?|you\s+downloaded|u\s+downloaded|downloaded|together|on|a|very|please)\b',
+                ' ', subj
+            )
+            # Keep "and" cleanly as subject separator ("tony stark and dr doom" -> "tony stark | dr doom")
+            parts = [p.strip() for p in re.split(r'\s+\band\b\s+', ' '.join(subj.split())) if p.strip()]
+            entity_val = " | ".join(parts) if parts else "tony stark | dr doom"
+            task = Task(
+                task_id=str(uuid.uuid4()),
+                description=f"Create 4K wallpaper collage combining {' & '.join(parts) if parts else 'downloaded wallpapers'}",
+                required_tools=["desktop"],
+                risk=RiskLevel.LOW,
+                action_metadata={
+                    "app": "media",
+                    "intent": "create_collage",
+                    "entity": entity_val,
+                    "desktop_action": "APP_INTENT_EXECUTE"
+                }
+            )
+            return Plan(
+                plan_id=str(uuid.uuid4()),
+                intent=Intent(primary_intent=IntentType.SYSTEM_MANAGEMENT, confidence=0.99, raw_query=query),
+                goal=Goal(primary_goal="Create 4K wallpaper collage"),
+                tasks=[task]
+            )
 
         # 0.65. 4K Photo, Image & Wallpaper Finder / Setter Fast-Path
         # e.g. "ada can u find some 4 k highquality photos of tony stark i want to ut it in walppaer in power shell and cmd so find fast"

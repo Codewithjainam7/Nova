@@ -15,6 +15,43 @@ from backend.desktop.controllers.base_controller import AppController
 from backend.core.logger import app_logger
 
 
+def _find_local_subject_images(subject: str, limit: int = 4) -> List[str]:
+    """Searches D:\\ADA_Wallpapers, D:\\Wallpaper, Downloads, and Pictures for images matching a subject."""
+    search_roots = [
+        r"D:\ADA_Wallpapers",
+        r"D:\Wallpaper",
+        os.path.join(os.path.expanduser("~"), "Downloads"),
+        os.path.join(os.path.expanduser("~"), "Pictures"),
+    ]
+    tokens = [t for t in re.split(r"[^a-z0-9]+", subject.lower()) if len(t) >= 3 and t not in ("the", "and", "for", "4k")]
+    matches: List[tuple] = []
+    seen = set()
+
+    for root_dir in search_roots:
+        if not os.path.exists(root_dir):
+            continue
+        for cur, _, files in os.walk(root_dir):
+            if "collages" in cur.lower():
+                continue
+            cur_low = cur.lower()
+            for fname in files:
+                if not fname.lower().endswith((".jpg", ".jpeg", ".png")):
+                    continue
+                full = os.path.join(cur, fname)
+                if full in seen:
+                    continue
+                hay = f"{cur_low} {fname.lower()}"
+                # Match either full token or prefix/stem (e.g. "doom" matches "doomsday")
+                score = sum(1 for tok in tokens if tok in hay)
+                if score > 0:
+                    seen.add(full)
+                    size = os.path.getsize(full) if os.path.exists(full) else 0
+                    matches.append((score, size, full))
+
+    matches.sort(key=lambda x: (x[0], x[1]), reverse=True)
+    return [m[2] for m in matches[:limit]]
+
+
 class MediaWallpaperController(AppController):
     """Controller for searching, downloading, and applying 4K photos & wallpapers."""
 
@@ -150,9 +187,201 @@ class MediaWallpaperController(AppController):
         os.makedirs(target, exist_ok=True)
         return target
 
+    def _download_for_subject(self, subject: str, limit: int = 3) -> List[str]:
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", f"{subject.lower()} 4k wallpaper").strip("_")[:40] or "wallpaper"
+        dest_dir = self._resolve_target_dir("find_wallpaper", slug)
+        candidates = self._search_high_res_images(f"{subject} 4k wallpaper", max_results=10)
+        if not candidates:
+            return []
+        saved_paths: List[str] = []
+        with ThreadPoolExecutor(max_workers=4) as pool:
+            futures = [
+                pool.submit(self._download_single, item, dest_dir, slug, idx)
+                for idx, item in enumerate(candidates[:7], 1)
+            ]
+            for fut in as_completed(futures):
+                res = fut.result()
+                if res and os.path.exists(res["path"]):
+                    saved_paths.append(res["path"])
+                if len(saved_paths) >= limit:
+                    break
+        return saved_paths
+
+    def _create_collage(self, subjects_raw: str) -> Optional[Dict[str, Any]]:
+        """
+        Composes a 3840x2160 (4K) stylized asymmetric bento wallpaper collage from local
+        downloaded photos across D:\\ADA_Wallpapers, D:\\Wallpaper, Downloads, and Pictures,
+        fetching high-res photos for any missing subject automatically.
+        """
+        from PIL import Image, ImageOps, ImageFilter, ImageDraw, ImageEnhance
+
+        subjects = [s.strip() for s in re.split(r"\s*\|\s*|\s+and\s+", subjects_raw or "") if s.strip()]
+        if not subjects:
+            subjects = ["tony stark", "dr doom"]
+
+        subject_pools: List[List[str]] = []
+        for subj in subjects[:3]:
+            local_hits = _find_local_subject_images(subj, limit=4)
+            # If user specifically asked for Dr Doom and only Avengers Doomsday or <2 hits exist locally, fetch 2 more dedicated shots
+            if len(local_hits) < 2:
+                fetched = self._download_for_subject(subj, limit=3 - len(local_hits))
+                for fpath in fetched:
+                    if fpath not in local_hits:
+                        local_hits.append(fpath)
+            if local_hits:
+                subject_pools.append(local_hits)
+
+        if not subject_pools:
+            # Broad fallback: grab any wallpapers in D:\ADA_Wallpapers or D:\Wallpaper
+            fallback = _find_local_subject_images("wallpaper", limit=6)
+            if fallback:
+                subject_pools.append(fallback)
+            else:
+                return None
+
+        # Order 6 panels: 3 left (subj 0), 1 center hero (cross/doom/hero), 2 right top + 1 right bottom (subj 1 or alt)
+        ordered_paths: List[str] = []
+        left_imgs = subject_pools[0]
+        right_imgs = subject_pools[1] if len(subject_pools) > 1 else subject_pools[0]
+
+        # Ensure 6 distinct paths by cycling cleanly without immediate neighbors matching
+        combined = []
+        for p in left_imgs + right_imgs:
+            if p not in combined:
+                combined.append(p)
+        if not combined:
+            return None
+
+        # Build panel list cleanly (Left top hero, Left bot 1, Left bot 2, Center full clash, Right top 1, Right top 2, Right bot hero -> 7 panels? Wait 6 panels!)
+        # 6 Asymmetric Cinematic Panels:
+        # [0] Top-Left (Left subj hero)   | [1] Bot-Left-A  | [2] Bot-Left-B
+        # [3] Full-Height Center Clash    | [4] Top-Right-A | [5] Top-Right-B | [6 -> Wait let's use 5 or 6 exact slots!]
+        # Let's match 6 exact slots cleanly:
+        # 0: Left Top Hero (56, 56, 1220, 1240)
+        # 1: Left Bot Left (56, 1328, 594, 776)
+        # 2: Left Bot Right (682, 1328, 594, 776)
+        # 3: Center Tall Hero (1308, 56, 1224, 2048)
+        # 4: Right Top Split (2564, 56, 1220, 776)
+        # 5: Right Bot Hero (2564, 864, 1220, 1240)
+        pool_left = list(left_imgs)
+        pool_right = list(right_imgs)
+        center_candidate = None
+        for p in right_imgs + left_imgs:
+            if "doomsday" in os.path.basename(p).lower():
+                center_candidate = p
+                break
+        if not center_candidate:
+            center_candidate = right_imgs[0] if len(subject_pools) > 1 else left_imgs[0]
+
+        def _pick(pool: List[str], idx: int, avoid: Optional[str] = None) -> str:
+            for off in range(len(pool)):
+                cand = pool[(idx + off) % len(pool)]
+                if cand != avoid or len(pool) == 1:
+                    return cand
+            return pool[0]
+
+        slot_specs = [
+            (56, 56, 1220, 1240, _pick(pool_left, 0), (218, 68, 55)),
+            (56, 1328, 594, 776, _pick(pool_left, 1), (225, 173, 66)),
+            (682, 1328, 594, 776, _pick(pool_left, 2), (218, 68, 55)),
+            (1308, 56, 1224, 2048, center_candidate, (220, 228, 240)),
+            (2564, 56, 1220, 776, _pick(pool_right, 0, avoid=center_candidate), (52, 199, 118)),
+            (2564, 864, 1220, 1240, _pick(pool_right, 1, avoid=center_candidate), (52, 199, 118)),
+        ]
+
+        W, H = 3840, 2160
+        try:
+            with Image.open(center_candidate) as bg_src:
+                bg = ImageOps.fit(bg_src.convert("RGB"), (W, H), method=Image.Resampling.LANCZOS)
+        except Exception:
+            bg = Image.new("RGB", (W, H), (14, 16, 22))
+        bg = bg.filter(ImageFilter.GaussianBlur(radius=46))
+        bg = ImageEnhance.Brightness(bg).enhance(0.24)
+        canvas = bg.convert("RGBA")
+
+        # Subtle left warm crimson & right emerald radial mood wash
+        glow = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        gdraw = ImageDraw.Draw(glow)
+        gdraw.ellipse((-400, -200, 1800, 2200), fill=(180, 35, 35, 55))
+        gdraw.ellipse((2000, -200, 4200, 2200), fill=(25, 145, 85, 55))
+        glow = glow.filter(ImageFilter.GaussianBlur(radius=160))
+        canvas = Image.alpha_composite(canvas, glow)
+
+        radius = 30
+        for x, y, pw, ph, img_path, accent_rgb in slot_specs:
+            # Soft shadow layer
+            shadow_layer = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+            sdraw = ImageDraw.Draw(shadow_layer)
+            sdraw.rounded_rectangle([x - 4, y + 10, x + pw + 4, y + ph + 14], radius=radius + 4, fill=(0, 0, 0, 175))
+            shadow_layer = shadow_layer.filter(ImageFilter.GaussianBlur(radius=18))
+            canvas = Image.alpha_composite(canvas, shadow_layer)
+
+            try:
+                with Image.open(img_path) as im:
+                    tile = ImageOps.fit(im.convert("RGB"), (pw, ph), method=Image.Resampling.LANCZOS).convert("RGBA")
+                    tile = ImageEnhance.Contrast(tile).enhance(1.06)
+                    tile = ImageEnhance.Color(tile).enhance(1.08)
+            except Exception:
+                continue
+
+            mask = Image.new("L", (pw, ph), 0)
+            mdraw = ImageDraw.Draw(mask)
+            mdraw.rounded_rectangle([0, 0, pw - 1, ph - 1], radius=radius, fill=255)
+
+            framed = Image.new("RGBA", (pw, ph), (0, 0, 0, 0))
+            framed.paste(tile, (0, 0), mask)
+
+            # Metallic accent border
+            bdraw = ImageDraw.Draw(framed)
+            bdraw.rounded_rectangle([1, 1, pw - 2, ph - 2], radius=radius, outline=(*accent_rgb, 210), width=4)
+            canvas.alpha_composite(framed, (x, y))
+
+        slug = re.sub(r"[^a-zA-Z0-9]+", "_", "_".join(subjects).lower()).strip("_")[:45] or "ada"
+        if os.path.exists("D:\\"):
+            out_dir = r"D:\ADA_Wallpapers\collages"
+        else:
+            out_dir = os.path.join(os.path.expanduser("~"), "Downloads", "ADA_Wallpapers", "collages")
+        os.makedirs(out_dir, exist_ok=True)
+        out_path = os.path.join(out_dir, f"{slug}_4k_collage.jpg")
+        canvas.convert("RGB").save(out_path, "JPEG", quality=96, subsampling=0)
+
+        used_files = list(dict.fromkeys([s[4] for s in slot_specs]))
+        return {
+            "path": out_path,
+            "size_kb": round(os.path.getsize(out_path) / 1024),
+            "used_files": used_files,
+            "subjects": subjects,
+        }
+
     def execute(self, intent: str, entity: Optional[str]) -> bool:
         app_logger.info(f"MediaWallpaperController executing intent='{intent}' entity='{entity}'")
         self.last_output = None
+
+        intent_low = (intent or "").lower().strip()
+        if intent_low in ("create_collage", "make_collage"):
+            result = self._create_collage(entity or "tony stark | dr doom")
+            if not result:
+                self.last_output = "Could not find or download enough valid photos to build the 4K collage."
+                return False
+            out_path = result["path"]
+            ps_cmd = (
+                "Add-Type -TypeDefinition 'using System.Runtime.InteropServices; public class W { "
+                '[DllImport("user32.dll", CharSet=CharSet.Auto)] public static extern int '
+                "SystemParametersInfo(int uAction, int uParam, string lpvParam, int fuWinIni); }'; "
+                f'[W]::SystemParametersInfo(20, 0, "{out_path}", 3)'
+            )
+            cmd_one_liner = (
+                f'reg add "HKCU\\Control Panel\\Desktop" /v Wallpaper /t REG_SZ /d "{out_path}" /f && '
+                f'RUNDLL32.EXE user32.dll,UpdatePerUserSystemParameters ,1 ,True'
+            )
+            sources_list = "\n".join([f"- `{p}`" for p in result["used_files"]])
+            self.last_output = (
+                f"Created your custom 4K (3840x2160) collage wallpaper at `{out_path}` ({result['size_kb']} KB).\n\n"
+                f"Source photos combined:\n{sources_list}\n\n"
+                f"PowerShell wallpaper command:\n```powershell\n{ps_cmd}\n```\n"
+                f"CMD wallpaper command:\n```cmd\n{cmd_one_liner}\n```"
+            )
+            return True
 
         raw_topic = (entity or "4k wallpaper").strip()
         slug = re.sub(r"[^a-zA-Z0-9]+", "_", raw_topic.lower()).strip("_")[:40] or "wallpaper"

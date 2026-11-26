@@ -88,6 +88,7 @@ class AppActionRouter:
             "organize", "organize_folder", "sort_folder", "clean_folder",
             "install_software", "download_and_install", "install", "download",
             "find_wallpaper", "set_wallpaper", "find_images", "download_wallpaper",
+            "create_collage", "make_collage",
             "create_workspace", "create_folder", "open_vscode", "system_diagnostics", "run_command"
         }
         if intent.lower().strip() not in headless_intents:

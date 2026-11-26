@@ -281,7 +281,7 @@ class CapabilityRouter:
                 "calculate", "compute", "math", "write_note", "write", "type_text",
                 "save_file", "play_media", "navigate", "open_folder", "explore",
                 "organize", "organize_folder", "sort_folder", "clean_folder",
-                "install_software", "find_wallpaper", "set_wallpaper",
+                "install_software", "find_wallpaper", "set_wallpaper", "create_collage", "make_collage",
                 "create_workspace", "create_folder", "open_vscode", "system_diagnostics", "run_command"
             ]:
                 action = DesktopAction(
